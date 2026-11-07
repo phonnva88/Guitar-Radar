@@ -1,8 +1,10 @@
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
-GO ?= $(if $(wildcard /workspace/.tools/go/bin/go),/workspace/.tools/go/bin/go,go)
-export GOPATH ?= /workspace/.cache/go
-export GOCACHE ?= /workspace/.cache/go-build
-export PIP_CACHE_DIR ?= /workspace/.cache/pip
+TOOLS_DIR ?= $(CURDIR)/.tools
+CACHE_DIR ?= $(CURDIR)/.cache
+GO ?= $(if $(wildcard $(TOOLS_DIR)/go/bin/go),$(TOOLS_DIR)/go/bin/go,go)
+export GOPATH ?= $(CACHE_DIR)/go
+export GOCACHE ?= $(CACHE_DIR)/go-build
+export PIP_CACHE_DIR ?= $(CACHE_DIR)/pip
 GROUP ?=
 PAGES ?= 2
 PAGE_SIZE ?= 20

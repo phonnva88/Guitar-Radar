@@ -2,10 +2,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # Existing task checkouts are isolated: do not create a Git worktree.
-export GOPATH="${GOPATH:-/workspace/.cache/go}"
-export GOCACHE="${GOCACHE:-/workspace/.cache/go-build}"
-export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/workspace/.cache/pip}"
-tools_dir="${GUITAR_RADAR_TOOLS:-/workspace/.tools}"
+repo_root="$(pwd)"
+# Cloud images traditionally expose /workspace, while WSL/local checkouts may
+# not. Keep all generated tools and caches in the checkout unless explicitly
+# overridden, so the same script works in either environment.
+cache_root="${GUITAR_RADAR_CACHE:-$repo_root/.cache}"
+export GOPATH="${GOPATH:-$cache_root/go}"
+export GOCACHE="${GOCACHE:-$cache_root/go-build}"
+export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$cache_root/pip}"
+tools_dir="${GUITAR_RADAR_TOOLS:-$repo_root/.tools}"
+mkdir -p "$cache_root" "$tools_dir"
 go_bin="$tools_dir/go/bin/go"
 if [[ ! -x "$go_bin" ]] || [[ "$("$go_bin" version)" != *'go1.25.5 '* ]]; then
   if [[ "$(uname -s)/$(uname -m)" != Linux/x86_64 ]]; then

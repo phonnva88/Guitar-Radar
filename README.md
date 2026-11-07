@@ -10,7 +10,7 @@ Hai adapter dùng API/parser thực của upstream đã pin, có thể build và
 
 ## Requirements
 
-- Linux x86_64 cho script tự cài Go; Go **1.25.5**, Python **3.11+**, `venv`, Git, curl, make.
+- Linux x86_64 cho script tự cài Go; Go **1.25.5**, Python **3.11+**, `venv`, Git, curl, make. Trên Windows, chạy trong WSL Ubuntu.
 - Facebook account/session hợp lệ có quyền đọc group. Không tự login, join group hay vượt checkpoint.
 - HTTPS: GitHub, domain package-manager mặc định, `go.dev`, `dl.google.com`, `www.facebook.com`, `facebook.com`. Không tải ảnh nên không cần CDN ảnh.
 
@@ -28,7 +28,7 @@ make test
 make demo
 ```
 
-`scripts/setup.sh` cài Go vào `/workspace/.tools` bằng archive chính thức và SHA-256 đã xác minh, tạo `.venv`, cài requirements đã pin và build `.bin/facebook-go`. Cache nằm ở `/workspace/.cache`. Script có thể chạy lại. Không tạo Git worktree: mỗi cloud task đã có checkout cô lập.
+`scripts/setup.sh` cài Go vào `.tools/` bằng archive chính thức và SHA-256 đã xác minh, tạo `.venv`, cài requirements đã pin và build `.bin/facebook-go`. Cache nằm ở `.cache/`; đặt `GUITAR_RADAR_TOOLS` hoặc `GUITAR_RADAR_CACHE` nếu muốn dùng nơi khác. Script có thể chạy lại. Không tạo Git worktree: mỗi cloud task đã có checkout cô lập.
 
 `make test` chạy Python unittest và Go race tests, không cần cookie hay Internet. Tests bao gồm pagination hai trang, checkpoint/rate limit, lỗi parse từng post, partial result, identity fallback, file stale và bảo vệ credential. Fixture không thay thế kiểm thử Facebook live.
 

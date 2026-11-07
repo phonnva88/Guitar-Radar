@@ -32,6 +32,34 @@ make demo
 
 `make test` chạy Python unittest và Go race tests, không cần cookie hay Internet. Tests bao gồm pagination hai trang, checkpoint/rate limit, lỗi parse từng post, partial result, identity fallback, file stale và bảo vệ credential. Fixture không thay thế kiểm thử Facebook live.
 
+### Windows với WSL Ubuntu
+
+Mở Ubuntu từ Start hoặc PowerShell bằng `wsl -d Ubuntu`, vào checkout trên ổ C:
+
+```bash
+cd /mnt/c/projects/Guitar-Radar
+git config core.autocrlf false
+git pull origin main
+bash scripts/setup.sh
+```
+
+Chạy mỗi lệnh trên một dòng, không gõ dấu `\` ở cuối. Repository đặt `.gitattributes` để shell/Python/Makefile luôn checkout với Linux line endings. Nếu `git pull` báo file cục bộ đã đổi, giữ các thay đổi bằng stash rồi thử lại:
+
+```bash
+git stash push -m "local changes before Guitar Radar update"
+git pull origin main
+```
+
+Stash chỉ cất file Git theo dõi; `.env` bị ignore vẫn nằm nguyên. Đừng chạy `git stash pop` nếu chưa cần lấy các thay đổi cũ lại. Nếu Ubuntu chưa có Python venv/curl/certificate, cài một lần bằng `sudo apt update` và `sudo apt install -y python3 python3-venv curl ca-certificates`; mật khẩu là mật khẩu Linux Ubuntu, không phải PIN Windows.
+
+Sau setup, tạo `.env` rồi chạy:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+.venv/bin/python scripts/phase0.py --group "https://www.facebook.com/groups/vegmpremium"
+```
+
 ### Session an toàn
 
 ```bash

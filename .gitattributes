@@ -1,0 +1,6 @@
+# Keep shell, Python and build files usable from WSL even when Git on Windows
+# has core.autocrlf enabled globally.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

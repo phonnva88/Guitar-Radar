@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "collector": "facebook-go",
+  "source": "synthetic",
+  "group_id": "123456789",
+  "run_id": "synthetic-example",
+  "started_at": "2026-11-07T12:00:00Z",
+  "collected_at": "2026-11-07T12:00:00Z",
+  "duration_ms": 0,
+  "pages_fetched": 2,
+  "requested_pages": 2,
+  "page_size": 20,
+  "sort": "CHRONOLOGICAL",
+  "status": "success",
+  "errors": [],
+  "posts": [
+    {"id": "1001", "groupId": "123456789", "authorId": "91", "authorName": "Synthetic Author A", "message": "SYNTHETIC: Example guitar post, not scraped from Facebook.", "permalink": "https://www.facebook.com/groups/123456789/posts/1001/", "createdAt": "2026-11-07T11:00:00Z", "attachments": ["https://example.invalid/guitar.jpg"]},
+    {"id": "1002", "groupId": "123456789", "authorName": "Synthetic Author B", "message": "SYNTHETIC: Caption with more detail.", "permalink": "https://www.facebook.com/groups/123456789/posts/1002/", "createdAt": "2026-11-07T10:00:00Z", "attachments": []},
+    {"id": "1003", "groupId": "123456789", "message": "SYNTHETIC: Seen by Go fixture only.", "permalink": null, "createdAt": "0001-01-01T00:00:00Z", "attachments": []}
+  ]
+}

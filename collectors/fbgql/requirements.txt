@@ -1,0 +1,14 @@
+# Audited upstream revision; no browser/login helper or Apify dependencies.
+fbgql @ git+https://github.com/bsho5/fbgql.git@28e03ae84012be44d37a67014fcfcfcc420c9ee9
+requests==2.32.5
+httpx==0.28.1
+click==8.3.0
+# Transitive runtime dependencies from the validated Python 3.12 environment.
+anyio==4.16.0
+certifi==2026.10.23
+charset-normalizer==3.5.2
+h11==0.16.0
+httpcore==1.0.9
+idna==3.20
+typing-extensions==4.16.0
+urllib3==2.8.0

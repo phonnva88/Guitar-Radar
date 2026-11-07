@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "collector": "fbgql",
+  "source": "synthetic",
+  "group_id": "123456789",
+  "run_id": "synthetic-example",
+  "started_at": "2026-11-07T12:00:00Z",
+  "collected_at": "2026-11-07T12:00:00Z",
+  "duration_ms": 0,
+  "pages_fetched": 2,
+  "requested_pages": 2,
+  "page_size": 20,
+  "sort": "CHRONOLOGICAL",
+  "status": "success",
+  "errors": [],
+  "posts": [
+    {"post_id": "1001", "text": "SYNTHETIC: Example guitar post, not scraped from Facebook.", "permalink": "https://www.facebook.com/groups/123456789/posts/1001/?ref=share", "created_time": 1794049200, "page_name": null, "comment_count": 0},
+    {"post_id": "1002", "text": "SYNTHETIC: Caption", "permalink": "https://www.facebook.com/groups/123456789/posts/1002/", "created_time": 1794045600, "page_name": null, "comment_count": 0},
+    {"post_id": "1004", "text": "SYNTHETIC: Seen by fbgql fixture only.", "permalink": "https://www.facebook.com/groups/123456789/posts/1004/", "created_time": null, "page_name": null, "comment_count": 0}
+  ]
+}

@@ -48,7 +48,7 @@ def write_json(path: Path, value: dict) -> None:
 def load_local_env() -> None:
     """Read only supported keys, without shell evaluation or value logging."""
     path = ROOT / ".env"
-    allowed = {"FACEBOOK_COOKIE", "FACEBOOK_COOKIE_FILE", "FACEBOOK_USER_ID", "FACEBOOK_GROUP_ID"}
+    allowed = {"FACEBOOK_COOKIE", "FACEBOOK_COOKIE_FILE", "FACEBOOK_USER_ID", "FACEBOOK_GROUP_ID", "KNOWN_IMAGE_POSTS"}
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()

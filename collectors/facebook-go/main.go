@@ -48,12 +48,24 @@ type envelope struct {
 	Status         string            `json:"status"`
 	Errors         []collectorError  `json:"errors"`
 	Posts          []json.RawMessage `json:"posts"`
+	Window         *windowInfo       `json:"window"`
+}
+
+type windowInfo struct {
+	From                  string `json:"from"`
+	To                    string `json:"to"`
+	Complete              bool   `json:"complete"`
+	StopReason            string `json:"stop_reason"`
+	ScannedPosts          int    `json:"scanned_posts"`
+	UnknownTimestampPosts int    `json:"unknown_timestamp_posts"`
+	OrderingViolations    int    `json:"ordering_violations"`
 }
 
 type config struct {
-	Group, Output, RunID string
-	Pages, PageSize      int
-	Timeout              time.Duration
+	Group, Output, RunID, DebugDir string
+	Pages, PageSize                int
+	Timeout                        time.Duration
+	From, To                       time.Time
 }
 
 type groupClient interface {
@@ -122,8 +134,10 @@ func classify(err error, stage string, page int) collectorError {
 		e.Code, e.Message = "checkpoint_required", "Facebook requires a checkpoint; collection stopped"
 	case errors.Is(err, groups.ErrRateLimited), errors.Is(err, groups.ErrFeatureBlocked):
 		e.Code, e.Message = "rate_limited", "Facebook rate limited or temporarily blocked collection; collection stopped"
-	case errors.Is(err, groups.ErrForbidden), errors.Is(err, groups.ErrNotMember), errors.Is(err, groups.ErrAccountRestricted):
-		e.Code, e.Message = "group_not_accessible", "group is not accessible to this session or account is restricted"
+	case errors.Is(err, groups.ErrAccountRestricted):
+		e.Code, e.Message = "account_restricted", "Facebook restricted this account; collection stopped without retry"
+	case errors.Is(err, groups.ErrForbidden), errors.Is(err, groups.ErrNotMember):
+		e.Code, e.Message = "group_not_accessible", "group is not accessible to this session"
 	case errors.Is(err, groups.ErrNotFound):
 		e.Code, e.Message = "group_not_found", "Facebook reported that the group was not found"
 	case errors.Is(err, groups.ErrDocIDStale), errors.As(err, &syntaxErr), errors.As(err, &typeErr):
@@ -146,8 +160,12 @@ func classify(err error, stage string, page int) collectorError {
 func newClient(ctx context.Context, cookies groups.Cookies) (groupClient, error) {
 	// The stdlib transport preserves inherited HTTP(S)_PROXY and system CA trust.
 	// Upstream disables automatic redirects and checks manual bootstrap redirects.
+	var transport http.RoundTripper = http.DefaultTransport
+	if capture, ok := ctx.Value(captureKey{}).(*rawCapture); ok {
+		transport = &captureTransport{Base: transport, Capture: capture}
+	}
 	return groups.NewContext(ctx, cookies,
-		groups.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
+		groups.WithHTTPClient(&http.Client{Timeout: 30 * time.Second, Transport: transport}),
 		groups.WithRetry(1, 0),
 	)
 }
@@ -162,6 +180,16 @@ func safeFetch(ctx context.Context, c groupClient, user, group string, opts grou
 }
 
 func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory clientFactory, result *envelope, log io.Writer) {
+	capture := &rawCapture{Stories: map[string]*storyEvidence{}, DebugDir: cfg.DebugDir}
+	for name, value := range cookies.Jar {
+		if name != "c_user" && name != "ps_l" && name != "ps_n" && (len(value) >= 4 || name == "xs") {
+			capture.Secrets = append(capture.Secrets, value)
+		}
+	}
+	ctx = captureContext(ctx, capture)
+	if result.Window != nil {
+		result.Window.StopReason = "error"
+	}
 	c, err := factory(ctx, cookies)
 	if err != nil {
 		result.Errors = append(result.Errors, classify(err, "bootstrap", 0))
@@ -169,7 +197,13 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 	}
 	cursor := ""
 	seenCursors := map[string]bool{}
+	seenPosts := map[string]bool{}
+	var previousTime time.Time
 	for pageNo := 1; pageNo <= cfg.Pages; pageNo++ {
+		capture.PageStoryCount = 0
+		capture.InvalidCursor = false
+		capture.FeedSeen = false
+		capture.PageInfoSeen = false
 		page, err := safeFetch(ctx, c, cookies.CUser, result.GroupID, groups.PostListOptions{
 			Sort: groups.SortChronological, Cursor: cursor, Count: cfg.PageSize,
 		})
@@ -178,27 +212,107 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 			break
 		}
 		result.PagesFetched++
+		if capture.PageStoryCount > len(page.Posts) {
+			result.Errors = append(result.Errors, collectorError{Code: "parse_error", Stage: "raw_story_count", Message: "upstream parser omitted one or more story nodes", Page: pageNo})
+		}
 		accepted := 0
+		allOlder := len(page.Posts) > 0
 		for i, post := range page.Posts {
 			// Isolate serialization failures to one post; preserve all other posts.
+			if result.Window != nil {
+				result.Window.ScannedPosts++
+				if post.CreatedAt.IsZero() || post.CreatedAt.Year() <= 1 {
+					result.Window.UnknownTimestampPosts++
+					allOlder = false
+				} else {
+					if !post.CreatedAt.Before(cfg.From) {
+						allOlder = false
+					}
+					if !seenPosts[post.ID] {
+						if !previousTime.IsZero() && post.CreatedAt.After(previousTime) {
+							result.Window.OrderingViolations++
+						}
+						previousTime = post.CreatedAt
+					}
+				}
+			}
+			seenPosts[post.ID] = true
 			raw, err := json.Marshal(post)
 			if err != nil {
+				allOlder = false
 				result.Errors = append(result.Errors, collectorError{Code: "parse_error", Stage: "post", Message: "post cannot be serialized", Page: pageNo, Post: i + 1})
 				continue
 			}
+			var enriched map[string]any
+			if json.Unmarshal(raw, &enriched) != nil {
+				continue
+			}
+			enriched = sanitize(enriched, capture.Secrets).(map[string]any)
+			enriched["image_candidates"] = []imageCandidate{}
+			enriched["possible_type"] = "unknown"
+			enriched["type_evidence"] = []string{}
+			enriched["debug_response_saved"] = false
+			enriched["debug_file"] = nil
+			evidence := capture.Stories[post.ID]
+			if evidence == nil {
+				evidence = capture.Stories[post.StoryID]
+			}
+			if evidence != nil {
+				enriched["image_candidates"] = evidence.Images
+				enriched["possible_type"] = evidence.PossibleType
+				enriched["type_evidence"] = evidence.TypeEvidence
+				if evidence.DebugFile != "" {
+					enriched["debug_file"] = evidence.DebugFile
+					enriched["debug_response_saved"] = true
+				}
+			}
+			raw, _ = json.Marshal(enriched)
 			result.Posts = append(result.Posts, raw)
 			accepted++
 		}
 		fmt.Fprintf(log, "[facebook-go] page=%d posts=%d\n", pageNo, accepted)
+		if result.Window != nil && capture.FeedSeen && !capture.PageInfoSeen {
+			result.Errors = append(result.Errors, collectorError{Code: "invalid_cursor", Stage: "pagination", Message: "group feed omitted pagination metadata; exhaustion cannot be established", Page: pageNo})
+			result.Window.StopReason = "invalid_cursor"
+			break
+		}
+		if capture.InvalidCursor {
+			result.Errors = append(result.Errors, collectorError{Code: "invalid_cursor", Stage: "pagination", Message: "Facebook signaled another page without a usable cursor", Page: pageNo})
+			if result.Window != nil {
+				result.Window.StopReason = "invalid_cursor"
+			}
+			break
+		}
 		if !page.HasNext {
+			if result.Window != nil {
+				result.Window.StopReason = "feed_exhausted"
+				result.Window.Complete = true
+			}
+			break
+		}
+		if result.Window != nil && allOlder && result.Window.OrderingViolations == 0 {
+			result.Window.StopReason = "older_than_from"
+			result.Window.Complete = true
 			break
 		}
 		if page.NextCursor == "" || seenCursors[page.NextCursor] {
-			result.Errors = append(result.Errors, collectorError{Code: "parse_error", Stage: "pagination", Message: "missing or repeated pagination cursor; collection stopped", Page: pageNo})
+			result.Errors = append(result.Errors, collectorError{Code: "pagination_stalled", Stage: "pagination", Message: "missing or repeated pagination cursor; collection stopped", Page: pageNo})
 			break
 		}
 		seenCursors[page.NextCursor] = true
 		cursor = page.NextCursor
+		if result.Window != nil {
+			result.Window.StopReason = "page_limit"
+		}
+	}
+	if capture.Err {
+		result.Errors = append(result.Errors, collectorError{Code: "media_parse_error", Stage: "debug", Message: "sanitized debug evidence could not be saved"})
+	}
+	if result.Window != nil {
+		if result.Window.UnknownTimestampPosts > 0 || result.Window.OrderingViolations > 0 || len(result.Errors) > 0 {
+			result.Window.Complete = false
+		}
+		fmt.Fprintf(log, "[facebook-go] window_complete=%t stop_reason=%s scanned=%d unknown_timestamps=%d ordering_violations=%d\n", result.Window.Complete, result.Window.StopReason, result.Window.ScannedPosts, result.Window.UnknownTimestampPosts, result.Window.OrderingViolations)
 	}
 }
 
@@ -236,27 +350,41 @@ func run(args []string, getenv func(string) string, stderr io.Writer, factory cl
 	start := time.Now()
 	cfg := config{}
 	var timeoutSeconds float64
+	var fromText, toText string
 	fs := flag.NewFlagSet("facebook-go", flag.ContinueOnError)
 	// Flag errors can include accidental credentials; only print our safe error.
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.Group, "group", getenv("FACEBOOK_GROUP_ID"), "numeric Facebook group ID or group URL")
 	fs.StringVar(&cfg.Output, "output", "data/raw/facebook-go.json", "raw JSON output")
 	fs.StringVar(&cfg.RunID, "run-id", "", "shared benchmark run ID")
-	fs.IntVar(&cfg.Pages, "pages", 2, "maximum pages (1..20)")
+	fs.IntVar(&cfg.Pages, "pages", 2, "maximum pages / window safety cap (1..200)")
 	fs.IntVar(&cfg.PageSize, "page-size", 20, "posts per page (1..20)")
 	fs.Float64Var(&timeoutSeconds, "timeout", 120, "total request budget in seconds")
+	fs.StringVar(&fromText, "from", "", "inclusive lower timestamp, RFC3339 with timezone")
+	fs.StringVar(&toText, "to", "", "inclusive upper timestamp, RFC3339 with timezone")
+	fs.StringVar(&cfg.DebugDir, "debug-dir", "", "private per-run sanitized GraphQL story directory")
 	parseErr := fs.Parse(args)
+	windowErr := false
+	if fromText != "" || toText != "" {
+		var fromErr, toErr error
+		cfg.From, fromErr = time.Parse(time.RFC3339Nano, fromText)
+		cfg.To, toErr = time.Parse(time.RFC3339Nano, toText)
+		windowErr = fromErr != nil || toErr != nil || cfg.From.After(cfg.To)
+	}
 	if timeoutSeconds > 0 && timeoutSeconds <= 3600 && !math.IsNaN(timeoutSeconds) && !math.IsInf(timeoutSeconds, 0) {
 		cfg.Timeout = time.Duration(timeoutSeconds * float64(time.Second))
 	}
 	if errors.Is(parseErr, flag.ErrHelp) {
-		fmt.Fprintln(stderr, "facebook-go --group ID|URL [--pages 2] [--page-size 20] [--timeout 120] [--output PATH] [--run-id ID]")
+		fmt.Fprintln(stderr, "facebook-go --group ID|URL [--pages 2] [--page-size 20] [--timeout 120] [--from RFC3339 --to RFC3339] [--debug-dir DIR] [--output PATH] [--run-id ID]")
 		return 0
 	}
 	if cfg.RunID == "" {
 		cfg.RunID = generatedRunID()
 	}
 	result := envelope{SchemaVersion: 1, Collector: "facebook-go", Source: "live", LibraryCommit: "0c762f3eea9082ed7a4694d6c474c3622546b3b6", RequestedPages: cfg.Pages, PageSize: cfg.PageSize, Sort: "CHRONOLOGICAL", RunID: cfg.RunID, StartedAt: start.UTC().Format(time.RFC3339Nano), Posts: []json.RawMessage{}, Errors: []collectorError{}}
+	if !cfg.From.IsZero() && !windowErr {
+		result.Window = &windowInfo{From: cfg.From.UTC().Format(time.RFC3339Nano), To: cfg.To.UTC().Format(time.RFC3339Nano), StopReason: "error"}
+	}
 	groupID, groupErr := parseGroup(cfg.Group)
 	result.GroupID = groupID
 	switch {
@@ -264,8 +392,8 @@ func run(args []string, getenv func(string) string, stderr io.Writer, factory cl
 		result.Errors = append(result.Errors, collectorError{Code: "unknown_error", Stage: "configuration", Message: "invalid CLI options; use --help"})
 	case groupErr != nil:
 		result.Errors = append(result.Errors, collectorError{Code: "unknown_error", Stage: "configuration", Message: groupErr.Error()})
-	case cfg.Pages < 1 || cfg.Pages > 20 || cfg.PageSize < 1 || cfg.PageSize > 20 || cfg.Timeout <= 0:
-		result.Errors = append(result.Errors, collectorError{Code: "unknown_error", Stage: "configuration", Message: "pages and page-size must be 1..20; timeout must be 0..3600 seconds exclusive of zero"})
+	case cfg.Pages < 1 || cfg.Pages > 200 || cfg.PageSize < 1 || cfg.PageSize > 20 || cfg.Timeout <= 0 || windowErr:
+		result.Errors = append(result.Errors, collectorError{Code: "unknown_error", Stage: "configuration", Message: "pages must be 1..200; page-size 1..20; timeout 0..3600 seconds; supply both --from/--to RFC3339 in ascending order"})
 	default:
 		cookies, err := parseCookies(getenv("FACEBOOK_COOKIE"), getenv("FACEBOOK_USER_ID"))
 		if err != nil {

@@ -176,6 +176,7 @@ func TestErrorClassification(t *testing.T) {
 		{groups.ErrSessionExpired, "session_expired"}, {groups.ErrCheckpoint, "checkpoint_required"},
 		{groups.ErrRateLimited, "rate_limited"}, {groups.ErrFeatureBlocked, "rate_limited"},
 		{groups.ErrNotMember, "group_not_accessible"}, {groups.ErrForbidden, "group_not_accessible"},
+		{groups.ErrAccountRestricted, "account_restricted"},
 		{groups.ErrNotFound, "group_not_found"}, {groups.ErrDocIDStale, "parse_error"},
 		{context.DeadlineExceeded, "network_error"},
 		{fmt.Errorf("%w: decoding feed with secret-that-must-not-leak", groups.ErrRequestFailed), "parse_error"},

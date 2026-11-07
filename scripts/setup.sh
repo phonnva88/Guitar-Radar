@@ -20,15 +20,20 @@ if [[ ! -x "$go_bin" ]] || [[ "$("$go_bin" version)" != *'go1.25.5 '* ]]; then
   fi
   archive="$(mktemp /tmp/guitar-radar-go.XXXXXX)"
   trap 'rm -f "$archive"' EXIT
+  echo 'Downloading verified Go toolchain...'
   curl -fsSL --retry 2 --max-time 180 https://go.dev/dl/go1.25.5.linux-amd64.tar.gz -o "$archive"
   # SHA-256 from official https://go.dev/dl/?mode=json&include=all
   echo "9e9b755d63b36acf30c12a9a3fc379243714c1c6d3dd72861da637f336ebb35b  $archive" | sha256sum -c -
   mkdir -p "$tools_dir"
+  echo 'Extracting Go (WSL /mnt/c can be slow; this step may take a few minutes)...'
   tar -xzf "$archive" -C "$tools_dir"
 fi
 python3 -c 'import sys; assert sys.version_info >= (3, 11), "Python 3.11+ required"'
+echo 'Preparing Python virtual environment...'
 if [[ ! -x .venv/bin/python ]]; then python3 -m venv .venv; fi
+echo 'Installing pinned Python dependencies...'
 .venv/bin/python -m pip install -r collectors/fbgql/requirements.txt
 mkdir -p .bin
+echo 'Building facebook-go collector...'
 (cd collectors/facebook-go && "$go_bin" mod download && "$go_bin" build -mod=readonly -o ../../.bin/facebook-go .)
 echo 'Dependencies installed and Go collector built. Run make test and make demo.'

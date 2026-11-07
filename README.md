@@ -21,6 +21,8 @@ Hai adapter dùng API/parser thực của upstream đã pin, có thể build và
 
 ## Setup
 
+Phase 0.5 (ảnh, cùng time window, repeated runs, stability/health): xem [hướng dẫn validation](docs/phase05-validation.md). Mặc định mới cho benchmark là **06/11/2026 00:00 giờ Việt Nam → now**; `now` được chốt một lần cho toàn bộ run. Phase 0 cũ vẫn dùng `make phase0`.
+
 ```bash
 cd /workspace/Guitar-Radar
 make setup
@@ -55,7 +57,7 @@ Stash chỉ cất file Git theo dõi; `.env` bị ignore vẫn nằm nguyên. Đ
 Sau setup, tạo `.env` rồi chạy:
 
 ```bash
-cp .env.example .env
+test -f .env || cp .env.example .env
 chmod 600 .env
 .venv/bin/python scripts/phase0.py --group "https://www.facebook.com/groups/vegmpremium"
 ```
@@ -63,7 +65,7 @@ chmod 600 .env
 ### Session an toàn
 
 ```bash
-cp .env.example .env
+test -f .env || cp .env.example .env
 chmod 600 .env
 # Sửa .env bằng editor cục bộ; không dán cookie vào chat, issue hay commit.
 ```
@@ -185,8 +187,8 @@ Không khẳng định `vegmpremium` public hay account đã join khi chưa xác
 ## Known limitations
 
 - Facebook **internal/non-official APIs** có thể thay doc ID/schema, collector có thể ngừng hoạt động. Session hết hạn, checkpoint/rate limiting vẫn có thể xảy ra. Đây chưa phải production system.
-- fbgql dùng payload/parser upstream qua transport có kiểm soát, không dùng `Scraper` cấp cao vì thiếu page cap phù hợp và có comments/retry ngoài phạm vi. Model Post đã pin **không có author/ảnh**: chúng là `null`/`[]`, không lấy `page_name` làm author.
-- facebook-go trả attachment URL tổng quát, có thể là link/video. Chỉ URL có bằng chứng ảnh được normalize thành image; không tự đổi permalink thành ảnh.
+- fbgql dùng payload/parser upstream qua transport có kiểm soát, không dùng `Scraper` cấp cao vì thiếu page cap phù hợp và có comments/retry ngoài phạm vi. Model Post đã pin không có author/ảnh. Phase 0.5 bổ sung ảnh từ raw GraphQL có bằng chứng; author vẫn `null`, không lấy `page_name` làm author.
+- facebook-go trả attachment URL tổng quát, có thể là link/video. Phase 0.5 đọc media từ raw story trước khi model upstream bỏ mất field; legacy output chỉ dùng image-extension fallback. Không tự đổi permalink thành ảnh.
 - Parser upstream có thể âm thầm bỏ feed edge không nhận dạng được. Wrapper cô lập lỗi nó nhìn thấy, không thể đếm mọi silent omission nếu không sửa upstream; `errors: 0` không đảm bảo không bỏ sót.
 - Feed live thay đổi giữa hai collector tuần tự; số trang bằng nhau chưa chắc cùng khoảng thời gian/số post. Chỉ báo khác biệt trong mẫu quan sát, không tự chọn collector tốt nhất.
 

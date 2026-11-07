@@ -9,9 +9,17 @@ GROUP ?=
 PAGES ?= 2
 PAGE_SIZE ?= 20
 TIMEOUT ?= 120
+GROUP_ID ?= $(GROUP)
+RUNS ?= 10
+MAX_PAGES ?= 50
+INTERVAL ?= 30
+WINDOW_TIMEOUT ?= 300
+FROM ?= 2026-11-06T00:00:00+07:00
+TO ?= now
+WINDOW_ARGS = $(if $(GROUP_ID),--group "$(GROUP_ID)",) --from "$(FROM)" --to "$(TO)" --max-pages $(MAX_PAGES) --timeout $(WINDOW_TIMEOUT)
 ARGS = $(if $(GROUP),--group "$(GROUP)",) --pages $(PAGES) --page-size $(PAGE_SIZE) --timeout $(TIMEOUT)
 
-.PHONY: setup build test phase0 collect-facebook-go collect-fbgql normalize compare demo
+.PHONY: setup build test phase0 collect-facebook-go collect-fbgql normalize compare demo benchmark-window benchmark-repeat validation-demo validation-analyze
 setup:
 	bash scripts/setup.sh
 build:
@@ -33,3 +41,11 @@ compare:
 	$(PYTHON) -m compare --input-dir data/normalized --output-dir reports
 demo:
 	$(PYTHON) scripts/phase0.py --demo
+benchmark-window: build
+	$(PYTHON) -m validation window $(WINDOW_ARGS)
+benchmark-repeat: build
+	$(PYTHON) -m validation repeat $(WINDOW_ARGS) --runs $(RUNS) --interval $(INTERVAL)
+validation-demo:
+	$(PYTHON) -m validation demo
+validation-analyze:
+	$(PYTHON) -m validation analyze

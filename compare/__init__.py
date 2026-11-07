@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from normalizer import canonical_permalink, identity, text, validate_envelope, web_url
+from normalizer import canonical_permalink, identity, text, timestamp, validate_envelope, web_url, window_datetimes, window_metadata
 
 FIELDS = ("text", "author", "url", "images", "posted_at")
 SETTINGS = ("requested_pages", "page_size", "sort")
@@ -23,6 +23,8 @@ def reference(post: dict, index: int | None = None) -> dict:
 
 def validate_normalized(run: object, collector: str) -> dict:
     run = validate_envelope(run, collector)
+    window = window_metadata(run.get("window"))
+    bounds = window_datetimes(window) if window else None
     for post in run["posts"]:
         if not isinstance(post, dict) or post.get("collector") != collector or identity(post.get("group_id")) != identity(run["group_id"]):
             raise ValueError("Normalized post has inconsistent collector or group")
@@ -31,6 +33,13 @@ def validate_normalized(run: object, collector: str) -> dict:
                 raise ValueError("Invalid normalized scalar field")
         if not isinstance(post.get("images"), list) or any(not web_url(image) for image in post["images"]):
             raise ValueError("Invalid normalized images")
+        if bounds:
+            when = timestamp(post.get("posted_at"))
+            if when is None:
+                raise ValueError("Window sample contains an undated post")
+            parsed = datetime.fromisoformat(when.replace("Z", "+00:00"))
+            if not bounds[0] <= parsed <= bounds[1]:
+                raise ValueError("Normalized post is outside the requested window")
     return run
 
 
@@ -144,12 +153,15 @@ def pair_evidence(first: dict, second: dict, match_by: str) -> dict:
 
 
 def summary(run: dict, unique: list[dict], duplicates: list[dict], unidentifiable: list[dict]) -> dict:
-    return {"total_posts": len(run["posts"]), "unique_posts": len(unique),
+    return {"total_posts": len(run["posts"]), "rows_collected": run.get("normalization", {}).get("input_posts", len(run["posts"])),
+            "posts_in_compared_sample": len(run["posts"]), "unique_posts": len(unique),
+            "identifiable_posts": sum(bool(post.get("post_id") or canonical_permalink(post.get("url"), run["group_id"])) for post in run["posts"]),
             "unique_identifiable_posts": len(unique) - len(unidentifiable), "duplicate_rows": len(duplicates),
             "unidentifiable_posts": len(unidentifiable), "duration_ms": run["duration_ms"],
             "errors": len(run["errors"]), "error_details": run["errors"], "status": run["status"],
             "source": run.get("source", "unknown"), "pages_fetched": run["pages_fetched"],
             "settings": {field: run.get(field) for field in SETTINGS}, "library_commit": run.get("library_commit"),
+            "git_commit": run.get("git_commit"), "window": window_metadata(run.get("window")), "window_filter": run.get("window_filter"),
             "duplicates": duplicates, "unidentifiable": unidentifiable}
 
 
@@ -165,12 +177,18 @@ def build_report(first: object, second: object) -> dict:
         raise ValueError("Collectors have different run_id values; refusing stale comparison")
     if first.get("source", "unknown") != second.get("source", "unknown"):
         raise ValueError("Collectors have different data sources; refusing mixed-source comparison")
+    first_window, second_window = window_metadata(first.get("window")), window_metadata(second.get("window"))
+    if bool(first_window) != bool(second_window):
+        raise ValueError("Both collectors must use the same time window")
+    if first_window and any(first_window[key] != second_window[key] for key in ("from", "to")):
+        raise ValueError("Collector time windows differ")
     left, duplicates_left, unidentifiable_left = deduplicate(first["posts"], group)
     right, duplicates_right, unidentifiable_right = deduplicate(second["posts"], group)
     matched = match_posts(left, right, group)
     pairs = [pair_evidence(left[i], right[j], method) for i, j, method in matched["matches"]]
-    settings_differ = [field for field in SETTINGS if first.get(field) != second.get(field)]
-    settings_unknown = [field for field in SETTINGS if first.get(field) is None or second.get(field) is None]
+    controlled_settings = ("sort",) if first_window else SETTINGS
+    settings_differ = [field for field in controlled_settings if first.get(field) != second.get(field)]
+    settings_unknown = [field for field in controlled_settings if first.get(field) is None or second.get(field) is None]
     notes = ["Counts describe these bounded samples, not all posts in the group.",
              "Field completeness is nonempty field presence, not verified caption/gallery completeness.",
              "An empty images array can represent a text-only post or a collector limitation.",
@@ -178,6 +196,11 @@ def build_report(first: object, second: object) -> dict:
              "CDN URLs may differ for the same image; URL-set equality does not establish visual identity.",
              "Repeated runs are needed to evaluate stability; this report contains one paired run.",
              "Only-in-sample lists exclude unidentifiable and ambiguous posts; they do not prove a global omission."]
+    if first_window:
+        notes.append("Both samples use the same inclusive time interval; equal page limits or page sizes are not required.")
+        notes.append("Window completion describes traversal evidence, not guaranteed absolute coverage; unknown timestamps or ordering violations invalidate a controlled coverage comparison.")
+        if any(first.get(field) != second.get(field) for field in ("requested_pages", "page_size")):
+            notes.append("Safety page limits or page sizes differ; compare only after both window traversals complete.")
     if settings_differ:
         notes.append("Collector settings differ: " + ", ".join(settings_differ))
     if settings_unknown:
@@ -192,7 +215,16 @@ def build_report(first: object, second: object) -> dict:
     if unidentifiable_left or unidentifiable_right or matched["ambiguous_left"] or matched["ambiguous_right"]:
         reasons.append("Some post identities are missing or ambiguous.")
     if settings_differ or settings_unknown:
-        reasons.append("Matching page limits, page sizes and sort settings are required for a controlled sample.")
+        reasons.append("Matching sort settings are required for a controlled window sample." if first_window else
+                       "Matching page limits, page sizes and sort settings are required for a controlled sample.")
+    if first_window:
+        for collector, run, window in (("facebook-go", first, first_window), ("fbgql", second, second_window)):
+            if not window["complete"] or window["stop_reason"] not in {"older_than_from", "feed_exhausted"}:
+                reasons.append(f"{collector} did not complete the requested time window (stop={window['stop_reason']}).")
+            if window["unknown_timestamp_posts"] or (run.get("window_filter") or {}).get("unknown_timestamp_posts", 0):
+                reasons.append(f"{collector} observed posts without timestamps; their time-window membership is unknown.")
+            if window["ordering_violations"]:
+                reasons.append(f"{collector} observed non-chronological timestamps; the lower-window boundary is not established reliably.")
     observation = {
         "more_unique_identifiable_posts": "facebook-go" if len(left) - len(unidentifiable_left) > len(right) - len(unidentifiable_right) else "fbgql" if len(right) - len(unidentifiable_right) > len(left) - len(unidentifiable_left) else "tie",
         "shorter_duration": "facebook-go" if first["duration_ms"] < second["duration_ms"] else "fbgql" if second["duration_ms"] < first["duration_ms"] else "tie",
@@ -201,6 +233,7 @@ def build_report(first: object, second: object) -> dict:
         observation = {key: None for key in observation}
     return {"schema_version": 1, "group_id": group, "run_id": first["run_id"],
             "group_input": first.get("group_input"),
+            "window": {key: first_window[key] for key in ("from", "to")} if first_window else None,
             "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "facebook_go": summary(first, left, duplicates_left, unidentifiable_left),
             "fbgql": summary(second, right, duplicates_right, unidentifiable_right),
@@ -226,9 +259,16 @@ def markdown_report(report: dict) -> str:
     lines = ["# Facebook Collector Comparison", "", f"Group: {safe_md(report['group_id'] or report.get('group_input') or 'unresolved')}", "",
              f"Run: {safe_md(report['run_id'])}", "", "## Collection", "",
              "| Metric | facebook-go | fbgql |", "|---|---:|---:|"]
-    for title, key in (("Source", "source"), ("Status", "status"), ("Rows collected", "total_posts"), ("Unique identifiable posts", "unique_identifiable_posts"),
+    for title, key in (("Source", "source"), ("Status", "status"), ("Rows collected (before time filtering)", "rows_collected"), ("Posts in compared sample", "total_posts"), ("Unique identifiable posts", "unique_identifiable_posts"),
                        ("Duplicate rows", "duplicate_rows"), ("Unidentifiable posts", "unidentifiable_posts"), ("Duration (ms)", "duration_ms"), ("Pages fetched", "pages_fetched"), ("Errors", "errors")):
         lines.append(f"| {title} | {safe_md(first[key])} | {safe_md(second[key])} |")
+    if report.get("window"):
+        window = report["window"]
+        lines += ["", "## Shared time window", "", f"Inclusive from: {safe_md(window['from'])}", "", f"Inclusive to: {safe_md(window['to'])}", "",
+                  "| Traversal evidence | facebook-go | fbgql |", "|---|---:|---:|"]
+        for title, key in (("Complete", "complete"), ("Stop reason", "stop_reason"), ("Scanned posts", "scanned_posts"),
+                           ("Unknown timestamps", "unknown_timestamp_posts"), ("Ordering violations", "ordering_violations")):
+            lines.append(f"| {title} | {safe_md(first['window'][key])} | {safe_md(second['window'][key])} |")
     lines += ["", "## Matching", "", f"Posts found by both: {match['matched_posts']}", "",
               f"Only facebook-go (identifiable sample): {match['only_facebook_go']}", "",
               f"Only fbgql (identifiable sample): {match['only_fbgql']}", "",

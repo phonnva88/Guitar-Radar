@@ -85,7 +85,7 @@ class CollectorTests(unittest.TestCase):
         result = self.run_collect()
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["pages_fetched"], 2)
-        self.assertEqual([p["post_id"] for p in result["posts"]], ["11", "22"])
+        self.assertEqual([p["post_id"] for p in result["posts"]], ["11", "22", "11"])
         self.assertEqual(result["posts"][0]["text"], "Pass Fender Japan")
         self.assertIsNone(result["posts"][0]["page_name"])
         transport = FakeTransport.instances[0]
@@ -127,7 +127,7 @@ class CollectorTests(unittest.TestCase):
         FakeTransport.responses = [page([story("11")], cursor="next", has_next=True), page([story("22")], cursor="next", has_next=True)]
         result = self.run_collect()
         self.assertEqual(result["pages_fetched"], 2)
-        self.assertEqual(result["errors"][0]["code"], "parse_error")
+        self.assertEqual(result["errors"][0]["code"], "pagination_stalled")
 
     def test_empty_valid_group_is_success_but_null_group_is_inaccessible(self):
         FakeTransport.responses = [page([])]
@@ -166,7 +166,7 @@ class CollectorTests(unittest.TestCase):
                 collector.group_id(value)
 
     def test_invalid_limits_are_configuration_errors(self):
-        self.args.pages = "21"
+        self.args.pages = "201"
         self.assertEqual(self.run_collect()["errors"][0]["code"], "configuration_error")
         self.assertFalse(FakeTransport.instances)
 
@@ -186,6 +186,20 @@ class CollectorTests(unittest.TestCase):
                     transport.get("https://www.facebook.com/", {"xs": "SECRET_TEST_SESSION"})
                 self.assertEqual(raised.exception.code, "network_error")
                 self.assertEqual(request.call_count, 1)
+        finally:
+            transport.close()
+
+    def test_transport_records_only_validated_final_url(self):
+        transport = collector.SafeTransport(2)
+        final_url = "https://www.facebook.com/groups/123/posts/11/"
+        try:
+            with patch.object(transport.session, "request", side_effect=[FakeResponse(302, headers={"Location": final_url}), FakeResponse(200, "<html>post</html>")]):
+                transport.get("https://www.facebook.com/share/p/example/", {})
+                self.assertEqual(transport.last_url, final_url)
+            with patch.object(transport.session, "request", return_value=FakeResponse(302, headers={"Location": "https://evil.invalid/"})):
+                with self.assertRaises(collector.CollectionError):
+                    transport.get("https://www.facebook.com/share/p/example/", {})
+                self.assertIsNone(transport.last_url)
         finally:
             transport.close()
 

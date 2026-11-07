@@ -1,0 +1,7 @@
+[
+  {"url": "https://www.facebook.com/share/p/1FAh8qGkKx/", "expected_has_images": true},
+  {"url": "https://www.facebook.com/share/p/1C3tg8rCQm/", "expected_has_images": true},
+  {"url": "https://www.facebook.com/share/p/1HctR4htGo/", "expected_has_images": true},
+  {"url": "https://www.facebook.com/share/p/1JMZMYrcML/", "expected_has_images": false},
+  {"url": "https://www.facebook.com/share/p/1DpPjtnm6T/", "expected_has_images": false}
+]

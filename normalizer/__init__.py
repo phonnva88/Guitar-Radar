@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 
 COLLECTORS = ("facebook-go", "fbgql")
 FACEBOOK_HOSTS = {"facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com", "mbasic.facebook.com", "fb.com", "www.fb.com"}
+POST_TYPES = {"normal_post", "shared_post", "anonymous_post", "announcement", "reel", "video", "photo_post", "marketplace_style_post", "suggested_post", "unknown"}
 
 
 def write_json(path: Path, value: object) -> None:
@@ -58,6 +59,35 @@ def timestamp(value: object) -> str | None:
         return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     except (ValueError, OverflowError, OSError):
         return None
+
+
+def window_metadata(value: object) -> dict | None:
+    """Validate an inclusive, timezone-aware interval and copy safe diagnostics."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("Run window must be an object or null")
+    start, end = value.get("from"), value.get("to")
+    if not isinstance(start, str) or not isinstance(end, str):
+        raise ValueError("Window needs timezone-aware from and to timestamps")
+    start, end = timestamp(start), timestamp(end)
+    if start is None or end is None or datetime.fromisoformat(start.replace("Z", "+00:00")) > datetime.fromisoformat(end.replace("Z", "+00:00")):
+        raise ValueError("Window timestamps must be valid and ordered")
+    complete = value.get("complete", False)
+    if type(complete) is not bool:
+        raise ValueError("Window complete must be a boolean")
+    result = {"from": start, "to": end, "complete": complete,
+              "stop_reason": text(value.get("stop_reason")) or "unknown"}
+    for key in ("scanned_posts", "unknown_timestamp_posts", "ordering_violations"):
+        count = value.get(key, 0)
+        if type(count) is not int or count < 0:
+            raise ValueError("Window counters must be nonnegative integers")
+        result[key] = count
+    return result
+
+
+def window_datetimes(value: dict) -> tuple[datetime, datetime]:
+    return tuple(datetime.fromisoformat(value[key].replace("Z", "+00:00")) for key in ("from", "to"))
 
 
 def web_url(value: object) -> str | None:
@@ -126,6 +156,7 @@ def validate_envelope(raw: object, expected_collector: str | None = None) -> dic
     pages = raw.get("pages_fetched")
     if isinstance(pages, bool) or not isinstance(pages, int) or pages < 0:
         raise ValueError("Run pages_fetched must be a nonnegative integer")
+    window_metadata(raw.get("window"))
     return raw
 
 
@@ -133,15 +164,48 @@ def run_metadata(raw: dict) -> dict:
     result = {key: raw.get(key) for key in ("schema_version", "collector", "group_id", "run_id", "started_at", "collected_at", "duration_ms", "pages_fetched", "status", "group_input")}
     result["group_id"] = identity(raw["group_id"])
     result["source"] = raw.get("source") if raw.get("source") in {"live", "synthetic"} else "unknown"
-    for key in ("requested_pages", "page_size", "sort", "library_commit"):
+    for key in ("requested_pages", "page_size", "sort", "library_commit", "git_commit"):
         value = raw.get(key)
         if value is None or isinstance(value, (str, int, float, bool)):
             result[key] = value
+    if "window" in raw:
+        result["window"] = window_metadata(raw.get("window"))
     # Keep only the documented error context, not arbitrary upstream payloads.
-    result["errors"] = [{k: error[k] for k in ("code", "stage", "message", "page", "post_index") if k in error}
+    result["errors"] = [{k: error[k] for k in ("code", "stage", "message", "page", "post_index", "skipped") if k in error}
                         if isinstance(error, dict) else {"code": "unknown_error", "stage": "collector", "message": "Malformed collector error"}
                         for error in raw["errors"]]
     return result
+
+
+def post_validation(post: dict) -> dict | None:
+    """Keep vetted media evidence separate from the stable normalized schema."""
+    keys = ("image_candidates", "possible_type", "type_evidence", "debug_file", "debug_response_saved")
+    if not any(key in post for key in keys):
+        return None
+    candidates = post.get("image_candidates", [])
+    if not isinstance(candidates, list):
+        raise ValueError("Image candidates must be an array")
+    images, seen = [], set()
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            raise ValueError("Image candidate must be an object")
+        url, source = web_url(candidate.get("url")), candidate.get("source")
+        if not url or source not in {"attachment", "media"} or url in seen:
+            continue
+        seen.add(url)
+        image = {"url": url, "source": source, "path": text(candidate.get("path"))}
+        for dimension in ("width", "height"):
+            size = candidate.get(dimension)
+            image[dimension] = size if type(size) is int and size > 0 else None
+        images.append(image)
+    evidence = post.get("type_evidence", [])
+    if not isinstance(evidence, list):
+        raise ValueError("Post type evidence must be an array")
+    return {"image_candidates": images,
+            "possible_type": post.get("possible_type") if post.get("possible_type") in POST_TYPES else "unknown",
+            "type_evidence": [item for item in evidence if text(item)],
+            "debug_file": text(post.get("debug_file")),
+            "debug_response_saved": post.get("debug_response_saved") is True}
 
 
 def normalize_post(post: object, raw: dict) -> dict:
@@ -169,27 +233,61 @@ def normalize_post(post: object, raw: dict) -> dict:
         values = (post.get("post_id"), post.get("text"), post.get("permalink"), post.get("created_time"))
         author_id, author_name, images = None, None, []
     post_id, caption, url, posted_at = values
-    return {"collector": collector, "post_id": identity(post_id), "group_id": group,
+    validation = post_validation(post)
+    # An explicit candidate array was examined against the actual media layout.
+    # Do not re-add rejected video thumbnails via the legacy URL fallback.
+    if "image_candidates" in post:
+        images = [candidate["url"] for candidate in validation["image_candidates"]]
+    result = {"collector": collector, "post_id": identity(post_id), "group_id": group,
             "group_name": None, "author_id": author_id, "author_name": author_name,
             "text": text(caption), "url": web_url(url), "images": images,
             "posted_at": timestamp(posted_at), "collected_at": timestamp(raw.get("collected_at"))}
+    if validation is not None:
+        result["validation"] = validation
+    return result
 
 
 def normalize_run(raw: object, expected_collector: str | None = None) -> dict:
     raw = validate_envelope(raw, expected_collector)
     normalized = run_metadata(raw)
     normalized["posts"] = []
+    window = normalized.get("window")
+    bounds = window_datetimes(window) if window else None
+    counts = {"input_posts": len(raw["posts"]), "in_window_posts": 0,
+              "before_window_posts": 0, "after_window_posts": 0,
+              "unknown_timestamp_posts": 0, "invalid_posts": 0,
+              "unknown_timestamp_references": []}
     for index, post in enumerate(raw["posts"]):
         try:
-            normalized["posts"].append(normalize_post(post, raw))
+            parsed = normalize_post(post, raw)
+            if bounds is not None:
+                if parsed["posted_at"] is None:
+                    counts["unknown_timestamp_posts"] += 1
+                    counts["unknown_timestamp_references"].append({"index": index, "post_id": parsed["post_id"], "url": parsed["url"]})
+                    continue
+                posted = datetime.fromisoformat(parsed["posted_at"].replace("Z", "+00:00"))
+                if posted < bounds[0]:
+                    counts["before_window_posts"] += 1
+                    continue
+                if posted > bounds[1]:
+                    counts["after_window_posts"] += 1
+                    continue
+                counts["in_window_posts"] += 1
+            normalized["posts"].append(parsed)
         except (ValueError, TypeError, KeyError):
+            counts["invalid_posts"] += 1
             normalized["errors"].append({"code": "parse_error", "stage": "normalization", "post_index": index,
                                          "message": "Post could not be normalized; other records were preserved"})
+    if window is not None:
+        normalized["window_filter"] = counts
+        window["scanned_posts"] = max(window["scanned_posts"], len(raw["posts"]))
+        window["unknown_timestamp_posts"] = max(window["unknown_timestamp_posts"], counts["unknown_timestamp_posts"])
     if len(normalized["errors"]) > len(raw["errors"]):
         normalized["status"] = "partial" if normalized["posts"] else "failed"
     normalized["normalization"] = {"input_posts": len(raw["posts"]), "output_posts": len(normalized["posts"]),
         "notes": ["Missing values are null or []; timestamps are UTC.",
                   "Field presence does not prove complete captions or galleries.",
-                  "facebook-go attachments are counted as images only for image file extensions.",
-                  "Pinned fbgql group Post model does not expose author or image fields."]}
+                  "Legacy facebook-go attachments use image file extensions; explicit image candidates use raw GraphQL media evidence.",
+                  "Pinned fbgql Post model has no author; media evidence is captured separately from raw GraphQL.",
+                  "Window filters are inclusive; undated posts remain in raw data and are excluded with diagnostics, not assumed outside the window."]}
     return normalized

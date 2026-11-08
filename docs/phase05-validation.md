@@ -38,16 +38,16 @@ Mỗi collector mặc định tối đa 50 page, 20 post/page, 300 giây; có th
 
 ## Known-image ground truth
 
-`fixtures/known-image-posts.json` chứa 6 link mới bạn xác nhận ngày 08/11/2026. Kỳ vọng có/không ảnh được giữ theo xác nhận của bạn; group và thời gian vẫn phải kiểm tra. Năm link cũ thuộc group khác được giữ trong `fixtures/known-image-posts-original.json` để lưu lịch sử.
+`fixtures/known-image-posts.json` chứa 6 link mới nhất bạn xác nhận ngày 08/11/2026. Kỳ vọng có/không ảnh được giữ theo xác nhận của bạn; group và thời gian vẫn phải kiểm tra. Hai bộ link cũ resolve về group khác được giữ trong `fixtures/known-image-posts-original.json` (5 link đầu) và `fixtures/known-image-posts-previous.json` (6 link bộ thứ hai) để lưu lịch sử. Mục tiêu benchmark vẫn là `vegmpremium`, numeric group ID `5651370361550003`.
 
 | Link share/p | Có ảnh |
 |---|---|
-| `1MKz4C9rsy` | Có |
-| `1BDCv251ZZ` | Có |
-| `1CaEKXdcFi` | Có |
-| `19x2HuF2UC` | Không |
-| `19rmAzGdhs` | Không |
-| `19xCxn31Uc` | Không |
+| `14uLjtGQZRb` | Có |
+| `1JEHYQ2TE7` | Có |
+| `1JFZZTdTXi` | Có |
+| `1E11hL2XoE` | Không |
+| `1LxqCmzb3Z` | Không |
+| `16ZnavcmMs3` | Không |
 
 Để dùng link mới với 10 lượt đã lưu, chạy trong WSL ở thư mục dự án:
 

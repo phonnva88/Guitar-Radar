@@ -1,5 +1,5 @@
 [
-  {"url": "https://www.facebook.com/share/p/14uLjtGQZRb/", "expected_has_images": true},
+  {"url": "https://www.facebook.com/share/p/14uLjtGQZRb/", "expected_has_images": true, "verified_posted_at": "2026-11-08T11:45:00+07:00"},
   {"url": "https://www.facebook.com/share/p/1JEHYQ2TE7/", "expected_has_images": true},
   {"url": "https://www.facebook.com/share/p/1JFZZTdTXi/", "expected_has_images": true},
   {"url": "https://www.facebook.com/share/p/1E11hL2XoE/", "expected_has_images": false},

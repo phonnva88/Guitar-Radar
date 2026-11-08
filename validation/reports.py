@@ -157,7 +157,7 @@ def _images(known, indexed, group_id, bounds):
         if scope["group_status"] == "wrong_group":
             status = "wrong_group"
         elif scope["group_status"] == "group_unverified":
-            status = "group_unverified"
+            status = "unresolved_alias" if scope["group_reason"] == "share_alias_unresolved" else "group_unverified"
         elif scope["window_status"] == "outside_window_verified":
             status = "outside_window_verified"
         elif scope["window_status"] == "timestamp_unknown":
@@ -178,7 +178,7 @@ def _images(known, indexed, group_id, bounds):
     eligible_images = [r for r in records if r["expected_has_images"] and r["eligible_for_window"]]
     observed = sum(r["observed"] for r in eligible_images)
     detected = sum(r["status"] == "detected" for r in eligible_images)
-    scope_statuses = ("wrong_group", "group_unverified", "outside_window_verified", "timestamp_unknown",
+    scope_statuses = ("wrong_group", "unresolved_alias", "group_unverified", "outside_window_verified", "timestamp_unknown",
                       "not_observed", "detected", "extraction_failure", "expected_text_only",
                       "unexpected_images", "ambiguous_duplicates")
     scope_counts = {status: sum(r["status"] == status for r in records) for status in scope_statuses}
@@ -197,7 +197,7 @@ def _images(known, indexed, group_id, bounds):
             "ambiguous_known_posts": ambiguous, "fixture_scope_counts": scope_counts,
             "wrong_group_posts": [r["post_id"] or r["url"] for r in records if r["status"] == "wrong_group"],
             "unverified_group_posts": [r["post_id"] or r["url"] for r in records if r["status"] == "group_unverified"],
-            "unresolved_posts": [r["post_id"] or r["url"] for r in records if r["group_reason"] == "share_alias_unresolved"],
+            "unresolved_posts": [r["post_id"] or r["url"] for r in records if r["status"] == "unresolved_alias"],
             "outside_window_verified_posts": [r["post_id"] or r["url"] for r in records if r["status"] == "outside_window_verified"],
             "timestamp_unknown_posts": [r["post_id"] or r["url"] for r in records if r["status"] == "timestamp_unknown"],
             "observed_without_images": failures, "records": records,
@@ -301,6 +301,7 @@ def _aggregate(observations, indexes, source, coverage):
                        "fixture_scope_counts": {key: sum(item["fixture_scope_counts"][key] for item in images)
                                                 for key in images[0]["fixture_scope_counts"]} if images else {},
                        "wrong_group_observations": sum(item["fixture_scope_counts"]["wrong_group"] for item in images),
+                       "unresolved_alias_observations": sum(item["fixture_scope_counts"]["unresolved_alias"] for item in images),
                        "group_unverified_observations": sum(item["fixture_scope_counts"]["group_unverified"] for item in images),
                        "outside_window_verified_observations": sum(item["fixture_scope_counts"]["outside_window_verified"] for item in images),
                        "timestamp_unknown_observations": sum(item["fixture_scope_counts"]["timestamp_unknown"] for item in images)},
@@ -378,8 +379,10 @@ def _ready_reasons(collector, metrics, consistency, source, group, paired_count,
     scope = metrics["images"]["fixture_scope_counts"]
     if scope.get("wrong_group", 0):
         reasons.append("Some supplied fixtures resolve to a different numeric group ID.")
+    if scope.get("unresolved_alias", 0):
+        reasons.append("Some supplied share aliases remain unresolved and cannot verify their group.")
     if scope.get("group_unverified", 0):
-        reasons.append("Some supplied fixtures have no verified numeric group ID, including unresolved aliases or post-ID-only entries.")
+        reasons.append("Some supplied fixtures have no verified numeric group ID, such as post-ID-only entries.")
     if scope.get("timestamp_unknown", 0):
         reasons.append("Some same-group fixtures have unknown timestamps and cannot be assigned to the fixed window.")
     if metrics["images"]["supplied_expected_image_observations"] and metrics["images"]["eligible_text_only_observations"] == 0:
@@ -548,7 +551,8 @@ def _stability_md(report):
               "Counts are fixture observations across runs. Invalid group/time fixtures do not enter image recall.", "",
               "| Status | facebook-go | fbgql |", "|---|---:|---:|"]
     for title, key in (("Wrong numeric group", "wrong_group_observations"),
-                       ("Group unverified or alias unresolved", "group_unverified_observations"),
+                       ("Share alias unresolved", "unresolved_alias_observations"),
+                       ("Other group unverified", "group_unverified_observations"),
                        ("Outside window with verified time", "outside_window_verified_observations"),
                        ("Timestamp unknown", "timestamp_unknown_observations"),
                        ("Eligible known image posts observed without images", "extraction_failures")):

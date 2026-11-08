@@ -118,6 +118,7 @@ class ValidationReportTests(unittest.TestCase):
         image = result["facebook_go"]["per_run"][0]["image_validation"]
         self.assertEqual(image["known_image_posts"], 1)
         self.assertEqual(image["unresolved_posts"], ["https://www.facebook.com/share/p/OpaqueExample/"])
+        self.assertEqual(image["fixture_scope_counts"]["unresolved_alias"], 1)
         self.assertEqual(image["missing_known_image_posts"], [])
         self.assertIsNone(image["image_detection_recall"])
         self.assertNotIn("DO_NOT_SAVE", json.dumps(result))

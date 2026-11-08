@@ -196,7 +196,7 @@ def image_validation(run: dict, known: list[dict]) -> dict:
         if scope["group_status"] == "wrong_group":
             status = "wrong_group"
         elif scope["group_status"] == "group_unverified":
-            status = "group_unverified"
+            status = "unresolved_alias" if scope["group_reason"] == "share_alias_unresolved" else "group_unverified"
         elif scope["window_status"] == "outside_window_verified":
             status = "outside_window_verified"
         elif scope["window_status"] == "timestamp_unknown":
@@ -227,12 +227,12 @@ def image_validation(run: dict, known: list[dict]) -> dict:
             "eligible_text_only_posts": sum(not r["expected_has_images"] and r["eligible_for_window"] for r in records),
             "unexpected_image_posts": [r.get("post_id") for r in records if r["status"] == "unexpected_images"],
             "fixture_scope_counts": {status: count(status) for status in (
-                "wrong_group", "group_unverified", "outside_window_verified", "timestamp_unknown",
+                "wrong_group", "unresolved_alias", "group_unverified", "outside_window_verified", "timestamp_unknown",
                 "not_observed", "detected", "extraction_failure", "expected_text_only", "unexpected_images",
                 "ambiguous_duplicates")},
             "wrong_group_posts": [r.get("post_id") or r.get("url") for r in records if r["status"] == "wrong_group"],
             "unverified_group_posts": [r.get("post_id") or r.get("url") for r in records if r["status"] == "group_unverified"],
-            "unresolved_posts": [r.get("post_id") or r.get("url") for r in records if r["group_reason"] == "share_alias_unresolved"],
+            "unresolved_posts": [r.get("post_id") or r.get("url") for r in records if r["status"] == "unresolved_alias"],
             "outside_window_verified_posts": [r.get("post_id") or r.get("url") for r in records if r["status"] == "outside_window_verified"],
             "timestamp_unknown_posts": [r.get("post_id") or r.get("url") for r in records if r["status"] == "timestamp_unknown"],
             "observed_without_images": [r.get("post_id") for r in eligible_positive if r["status"] == "extraction_failure"],
@@ -378,7 +378,7 @@ def persist_suite(runs: list[dict], known: list[dict], output_dir: Path):
             v = run["images"][collector]
             lines += [f"- {collector}: known image posts={v['known_image_posts']}, observed={v['observed_known_image_posts']}, detected={v['detected_image_posts']}",
                       f"  Eligible in-window image fixtures: {v['eligible_known_image_posts']}; recall: {v['image_detection_recall']}",
-                      f"  Wrong group: {', '.join(map(str, v['wrong_group_posts'])) or 'none'}; group unverified: {', '.join(map(str, v['unverified_group_posts'])) or 'none'}",
+                      f"  Wrong group: {', '.join(map(str, v['wrong_group_posts'])) or 'none'}; unresolved aliases: {', '.join(map(str, v['unresolved_posts'])) or 'none'}; other group unverified: {', '.join(map(str, v['unverified_group_posts'])) or 'none'}",
                       f"  Outside window (verified): {', '.join(map(str, v['outside_window_verified_posts'])) or 'none'}; timestamp unknown: {', '.join(map(str, v['timestamp_unknown_posts'])) or 'none'}",
                       f"  Extraction failures: {', '.join(map(str, v['extraction_failures'])) or 'none established'}; not observed in window: {', '.join(map(str, v['missing_known_image_posts'])) or 'none'}"]
     lines += ["", "Known fixtures must be user-confirmed. Synthetic tests do not establish live image extraction or complete galleries."]

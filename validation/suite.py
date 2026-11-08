@@ -17,7 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 from compare import build_report, markdown_report, write_markdown
 from normalizer import canonical_permalink, normalize_run, timestamp, write_json
 from scripts import phase0
-from validation.ground_truth import assess_fixture
+from validation.ground_truth import RESOLUTION_ERRORS, assess_fixture, numeric_group_from_url
 
 ROOT = phase0.ROOT
 COLLECTORS = phase0.COLLECTORS
@@ -106,6 +106,14 @@ def known_posts(path: Path | None, csv: str = "") -> list[dict]:
             raise ValueError("verified_posted_at must be a timezone-aware ISO 8601 timestamp")
         record = {"post_id": post_id, "url": url, "unresolved": post_id is None,
                   "expected_has_images": entry["expected_has_images"]}
+        if entry.get("source_url"):
+            source_url = fixture_url(entry["source_url"])
+            if not source_url:
+                raise ValueError("Known-post source URL must be a Facebook post URL")
+            record["source_url"] = source_url
+        error = entry.get("resolution_error")
+        if isinstance(error, str) and error in RESOLUTION_ERRORS:
+            record["resolution_error"] = error
         if verified_at:
             record["verified_posted_at"] = verified_at
         result[label] = record
@@ -150,10 +158,17 @@ def resolve_known(known, timeout=120):
                         safe = fixture_url(url)
                         key = canonical_permalink(safe) if safe else None
                         if key:
-                            candidates[key.removeprefix("post:")] = safe
+                            candidates.setdefault(key.removeprefix("post:"), []).append(safe)
                     if len(candidates) == 1:
-                        post_id, resolved_url = next(iter(candidates.items()))
-                        entry.update(post_id=post_id, source_url=entry["url"], url=resolved_url, unresolved=False)
+                        post_id, references = next(iter(candidates.items()))
+                        numeric = [url for url in references if numeric_group_from_url(url)]
+                        groups = {numeric_group_from_url(url) for url in numeric}
+                        if len(groups) > 1:
+                            entry["resolution_error"] = "ambiguous_canonical_group"
+                        else:
+                            resolved_url = (numeric or references)[0]
+                            entry.update(post_id=post_id, source_url=entry["url"], url=resolved_url, unresolved=False)
+                            entry.pop("resolution_error", None)
                     else:
                         entry["resolution_error"] = "ambiguous_or_missing_canonical_post"
                 except adapter.CollectionError as exc:
@@ -355,6 +370,7 @@ def collect_pair(args, start, end, known, *, execute=subprocess.run) -> dict:
 def finish_run(metadata: dict, runs: dict, known: list[dict], directory: Path | None = None) -> dict:
     comparison = build_report(runs["facebook-go"], runs["fbgql"])
     value = {"metadata": metadata, "collectors": runs, "comparison": comparison,
+             "analysis_known_posts": known,
              "diagnostics": diagnostics(comparison, runs),
              "images": {name: image_validation(run, known) for name, run in runs.items()}}
     write_json(ROOT / "reports/runs" / (metadata["run_id"] + ".json"), value)
@@ -433,9 +449,56 @@ def demo(args):
     return 0
 
 
+def resolve_fixtures(args) -> int:
+    """Resolve only fixture URLs; never collect feed posts or archive suite reports."""
+    fixture = args.known_posts or (ROOT / "fixtures/known-image-posts.json")
+    known = known_posts(fixture)
+    if not known or not math.isfinite(args.timeout) or not 1 <= args.timeout <= 3600:
+        raise ValueError("Fixture resolution needs fixtures and a valid timeout")
+    output = args.output_dir / "known-posts-resolved.json"
+    status_path = args.output_dir / "fixture-resolution-status.json"
+    write_json(output, known)
+    write_json(status_path, {"status": "running", "started_at": phase0.now()})
+    stop = None
+    try:
+        phase0.load_local_env()
+        if any(item["unresolved"] for item in known) and not os.environ.get("FACEBOOK_COOKIE"):
+            raise phase0.RunError("authentication_failed", "Fixture resolution requires a local session.")
+        known, stop = resolve_known(known, args.timeout)
+    except phase0.RunError as exc:
+        stop = exc
+    write_json(output, known)
+    resolved = sum(not item.get("unresolved") and numeric_group_from_url(item.get("url")) is not None for item in known)
+    failed = bool(stop or resolved != len(known))
+    write_json(status_path, {"status": "incomplete" if failed else "completed", "finished_at": phase0.now(),
+                             "fixtures": len(known), "resolved_with_numeric_group": resolved,
+                             "stop_code": stop.code if stop else None, "feed_collection_started": False})
+    if stop:
+        code = stop.code if stop.code in STOP_HINTS else "authentication_failed"
+        print(f"[validation] STOP: {code}. {STOP_HINTS[code]}", file=sys.stderr)
+    print(f"[validation] Fixture links with numeric group: {resolved}/{len(known)}. No feed collection. See {output}.", file=sys.stderr)
+    return int(failed)
+
+
+def selected_run_ids(args) -> set[str] | None:
+    """Read a selection before its source report can be archived."""
+    if args.run_ids_from:
+        value = json.loads(args.run_ids_from.read_text(encoding="utf-8"))
+        values = value.get("run_ids") if isinstance(value, dict) else None
+    elif args.run_ids:
+        values = [value.strip() for value in args.run_ids.split(",")]
+    else:
+        return None
+    if (not isinstance(values, list) or not values
+            or any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", value) for value in values)
+            or len(values) != len(set(values))):
+        raise ValueError("Run selection needs nonempty, unique run IDs")
+    return set(values)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Phase 0.5 window/repeated validation; no Phase 1 services")
-    parser.add_argument("command", choices=("window", "repeat", "analyze", "demo"))
+    parser.add_argument("command", choices=("window", "repeat", "analyze", "resolve-known", "demo"))
     parser.add_argument("--group")
     parser.add_argument("--from", dest="start", default="2026-11-06T00:00:00+07:00", help="Inclusive lower bound; default matches the requested vegmpremium validation")
     parser.add_argument("--to", dest="end", default="now", help="Inclusive upper bound, or now (frozen once for all repeats)")
@@ -446,27 +509,33 @@ def main(argv=None) -> int:
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--known-posts", type=Path)
     parser.add_argument("--runs-dir", type=Path, default=Path("data/runs"))
-    parser.add_argument("--run-ids", help="Comma-separated saved run IDs for analyze; do not mix groups/windows")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--run-ids", help="Comma-separated saved run IDs for analyze; do not mix groups/windows")
+    selection.add_argument("--run-ids-from", type=Path, help="Read run_ids from an existing suite JSON before archiving it; analyze only")
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
     args = parser.parse_args(argv)
     try:
         if args.command == "demo":
             return demo(args)
+        if args.command != "analyze" and (args.run_ids or args.run_ids_from):
+            raise ValueError("Saved run selections are only valid for analyze")
+        if args.command == "resolve-known":
+            return resolve_fixtures(args)
+        requested = selected_run_ids(args) if args.command == "analyze" else None
         archive_summaries(args.output_dir)
         phase0.load_local_env()
         fixture = args.known_posts or (ROOT / "fixtures/known-image-posts.json")
-        known = known_posts(fixture, os.environ.get("KNOWN_IMAGE_POSTS", ""))
+        known = known_posts(fixture, "" if args.known_posts else os.environ.get("KNOWN_IMAGE_POSTS", ""))
         if args.command == "analyze":
             runs = []
             saved_known = None
-            requested = set(args.run_ids.split(",")) if args.run_ids else None
             for directory in sorted(args.runs_dir.iterdir()):
                 if directory.is_dir() and (directory / "metadata.json").is_file():
                     metadata = json.loads((directory / "metadata.json").read_text())
                     if requested is not None and metadata.get("run_id") not in requested:
                         continue
                     per_known = known if args.known_posts else metadata.get("known_posts", known)
-                    signature = lambda values: sorted((str(item.get("post_id")), str(item.get("url")), item["expected_has_images"]) for item in values)
+                    signature = lambda values: sorted((str(item.get("post_id")), str(item.get("url")), item.get("verified_posted_at") or "", item["expected_has_images"]) for item in values)
                     if saved_known is not None and signature(saved_known) != signature(per_known):
                         raise ValueError("Saved known-post resolutions differ; select compatible runs or provide an explicit fixture")
                     saved_known = per_known
@@ -501,10 +570,15 @@ def main(argv=None) -> int:
         persist_suite(runs, known, args.output_dir)
         result = int(any(r["collectors"][c]["status"] != "success" or not (r["collectors"][c].get("window") or {}).get("complete") for r in runs for c in COLLECTORS))
         write_json(args.output_dir / "validation-status.json", {"status": "completed_with_collection_errors" if result else "completed", "finished_at": phase0.now(), "run_ids": [r["metadata"]["run_id"] for r in runs]})
+        if args.command == "analyze":
+            print(f"[validation] Offline analysis finished: {len(runs)} saved pairs. Reports: {args.output_dir / 'final-report.md'}.", file=sys.stderr)
+            if result:
+                print("[validation] Saved collection failures/incomplete windows are retained; no new feed requests were made.", file=sys.stderr)
         return result
-    except (OSError, ValueError, TypeError, KeyError, ImportError):
+    except (OSError, ValueError, TypeError, KeyError, ImportError, phase0.RunError):
         try:
-            write_json(args.output_dir / "validation-status.json", {"status": "failed", "finished_at": phase0.now(), "message": "Validation failed; previous summaries belong to archived runs."})
+            name = "fixture-resolution-status.json" if args.command == "resolve-known" else "validation-status.json"
+            write_json(args.output_dir / name, {"status": "failed", "finished_at": phase0.now(), "message": "Check input files and local configuration; no credentials logged."})
         except OSError:
             pass
         print("[validation] Cannot complete: check setup, timezone window, matching groups/windows and known-post fixture schema. No credentials logged.", file=sys.stderr)

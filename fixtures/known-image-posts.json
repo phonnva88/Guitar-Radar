@@ -1,7 +1,8 @@
 [
-  {"url": "https://www.facebook.com/share/p/1FAh8qGkKx/", "expected_has_images": true},
-  {"url": "https://www.facebook.com/share/p/1C3tg8rCQm/", "expected_has_images": true},
-  {"url": "https://www.facebook.com/share/p/1HctR4htGo/", "expected_has_images": true},
-  {"url": "https://www.facebook.com/share/p/1JMZMYrcML/", "expected_has_images": false},
-  {"url": "https://www.facebook.com/share/p/1DpPjtnm6T/", "expected_has_images": false}
+  {"url": "https://www.facebook.com/share/p/1MKz4C9rsy/", "expected_has_images": true},
+  {"url": "https://www.facebook.com/share/p/1BDCv251ZZ/", "expected_has_images": true},
+  {"url": "https://www.facebook.com/share/p/1CaEKXdcFi/", "expected_has_images": true},
+  {"url": "https://www.facebook.com/share/p/19x2HuF2UC/", "expected_has_images": false},
+  {"url": "https://www.facebook.com/share/p/19rmAzGdhs/", "expected_has_images": false},
+  {"url": "https://www.facebook.com/share/p/19xCxn31Uc/", "expected_has_images": false}
 ]

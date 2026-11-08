@@ -107,6 +107,93 @@ class SuiteTests(unittest.TestCase):
             self.assertFalse((directory / "collector-health.md").exists())
             self.assertEqual(json.loads((directory / "validation-status.json").read_text())["status"], "running")
 
+    def test_resolve_only_preserves_reports_and_never_collects(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(suite, "ROOT", Path(tmp)):
+            root = Path(tmp)
+            path = root / "fixtures/known-image-posts.json"
+            phase0.write_json(path, [{"url": "https://www.facebook.com/share/p/test123/", "expected_has_images": False}])
+            out = root / "reports"
+            phase0.write_json(out / "stability.json", {"run_ids": ["existing-run"]})
+            original = (out / "stability.json").read_bytes()
+            resolved = [{"post_id": "123", "url": "https://www.facebook.com/groups/9/posts/123/", "unresolved": False,
+                         "source_url": "https://www.facebook.com/share/p/test123/", "expected_has_images": False}]
+            with patch.dict(os.environ, {"FACEBOOK_COOKIE": "synthetic-test-only"}, clear=True), \
+                 patch.object(phase0, "load_local_env"), patch.object(suite, "resolve_known", return_value=(resolved, None)), \
+                 patch.object(suite, "collect_pair") as collect, patch.object(suite, "archive_summaries") as archive, \
+                 contextlib.redirect_stderr(io.StringIO()) as logs:
+                result = suite.main(["resolve-known", "--output-dir", str(out)])
+            self.assertEqual(result, 0)
+            collect.assert_not_called()
+            archive.assert_not_called()
+            self.assertEqual((out / "stability.json").read_bytes(), original)
+            self.assertFalse((out / "validation-status.json").exists())
+            status = json.loads((out / "fixture-resolution-status.json").read_text())
+            self.assertEqual(status["resolved_with_numeric_group"], 1)
+            self.assertFalse(status["feed_collection_started"])
+            self.assertEqual(suite.known_posts(out / "known-posts-resolved.json")[0]["source_url"], resolved[0]["source_url"])
+            self.assertNotIn("synthetic-test-only", logs.getvalue())
+
+    def test_resolve_only_missing_or_unreadable_session_stops_cleanly(self):
+        for error in (None, phase0.RunError("authentication_failed", "xs=SECRET_TEST_DO_NOT_LOG")):
+            with self.subTest(error=bool(error)), tempfile.TemporaryDirectory() as tmp, patch.object(suite, "ROOT", Path(tmp)):
+                root = Path(tmp)
+                phase0.write_json(root / "fixtures/known-image-posts.json", [{"url": "https://www.facebook.com/share/p/test123/", "expected_has_images": True}])
+                out = root / "reports"
+                with patch.dict(os.environ, {}, clear=True), patch.object(phase0, "load_local_env", side_effect=error), \
+                     patch.object(suite, "resolve_known") as resolve, patch.object(suite, "collect_pair") as collect, \
+                     contextlib.redirect_stderr(io.StringIO()) as logs:
+                    result = suite.main(["resolve-known", "--output-dir", str(out)])
+                self.assertEqual(result, 1)
+                resolve.assert_not_called()
+                collect.assert_not_called()
+                self.assertNotIn("SECRET_TEST_DO_NOT_LOG", logs.getvalue())
+                self.assertIn("authentication_failed", logs.getvalue())
+                self.assertTrue(json.loads((out / "known-posts-resolved.json").read_text())[0]["unresolved"])
+
+    def test_analyze_reads_manifest_before_archive_and_records_fixture_override(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(suite, "ROOT", Path(tmp)):
+            root = Path(tmp)
+            args = argparse.Namespace(max_pages=2, page_size=20)
+            old_known = [self.scoped("123", group="77")]
+            for rid in ("selected", "ignored"):
+                directory = root / "data/runs" / rid
+                metadata = {"run_id": rid, "group_id": "9", "from": "2026-11-06T00:00:00Z", "to": "2026-11-07T00:00:00Z",
+                            "source": "live", "known_posts": old_known}
+                phase0.write_json(directory / "metadata.json", metadata)
+                for collector in suite.COLLECTORS:
+                    raw = suite.failed_run(collector, "9", "9", rid, metadata["from"], metadata["to"], args,
+                                           phase0.RunError("network_error", "Saved test failure"))
+                    phase0.write_json(directory / f"{collector}.raw.json", raw)
+            original = (root / "data/runs/selected/metadata.json").read_bytes()
+            replacement = root / "replacement.json"
+            phase0.write_json(replacement, [self.scoped("456", False, source_url="https://www.facebook.com/share/p/test456/")])
+            out = root / "reports"
+            phase0.write_json(out / "stability.json", {"run_ids": ["selected"]})
+            with patch.object(phase0, "load_local_env"), patch.dict(os.environ, {"KNOWN_IMAGE_POSTS": "unwanted"}), \
+                 patch.object(suite, "resolve_known") as resolve, patch.object(suite, "collect_pair") as collect, \
+                 contextlib.redirect_stderr(io.StringIO()) as logs:
+                result = suite.main(["analyze", "--runs-dir", str(root / "data/runs"), "--run-ids-from", str(out / "stability.json"),
+                                     "--known-posts", str(replacement), "--output-dir", str(out)])
+            self.assertEqual(result, 1)  # The historical network failures remain visible.
+            resolve.assert_not_called()
+            collect.assert_not_called()
+            saved = json.loads((out / "stability.json").read_text())
+            self.assertEqual(saved["run_ids"], ["selected"])
+            self.assertEqual(saved["evaluated_known_posts"][0]["post_id"], "456")
+            self.assertEqual(saved["evaluated_known_posts"][0]["source_url"], "https://www.facebook.com/share/p/test456/")
+            self.assertEqual(saved["known_post_count"], 1)
+            self.assertEqual(saved["metadata"][0]["known_posts"], old_known)
+            self.assertEqual((root / "data/runs/selected/metadata.json").read_bytes(), original)
+            self.assertIn("Offline analysis finished: 1 saved pairs", logs.getvalue())
+
+    def test_run_manifest_rejects_empty_duplicate_and_unsafe_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "manifest.json"
+            for values in ([], ["same", "same"], ["../wrong"], "not-a-list"):
+                phase0.write_json(path, {"run_ids": values})
+                with self.subTest(values=values), self.assertRaises(ValueError):
+                    suite.selected_run_ids(argparse.Namespace(run_ids=None, run_ids_from=path))
+
     def test_offline_analyze_uses_saved_share_resolution(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(suite, "ROOT", Path(tmp)):
             root = Path(tmp)

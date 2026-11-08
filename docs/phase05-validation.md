@@ -38,15 +38,27 @@ Mỗi collector mặc định tối đa 50 page, 20 post/page, 300 giây; có th
 
 ## Known-image ground truth
 
-`fixtures/known-image-posts.json` đã chứa 5 link bạn xác nhận:
+`fixtures/known-image-posts.json` chứa 6 link mới bạn xác nhận ngày 08/11/2026. Kỳ vọng có/không ảnh được giữ theo xác nhận của bạn; group và thời gian vẫn phải kiểm tra. Năm link cũ thuộc group khác được giữ trong `fixtures/known-image-posts-original.json` để lưu lịch sử.
 
 | Link share/p | Có ảnh |
 |---|---|
-| `1FAh8qGkKx` | Có |
-| `1C3tg8rCQm` | Có |
-| `1HctR4htGo` | Có |
-| `1JMZMYrcML` | Không |
-| `1DpPjtnm6T` | Không |
+| `1MKz4C9rsy` | Có |
+| `1BDCv251ZZ` | Có |
+| `1CaEKXdcFi` | Có |
+| `19x2HuF2UC` | Không |
+| `19rmAzGdhs` | Không |
+| `19xCxn31Uc` | Không |
+
+Để dùng link mới với 10 lượt đã lưu, chạy trong WSL ở thư mục dự án:
+
+```bash
+git pull --ff-only origin main
+.venv/bin/python -m validation resolve-known && .venv/bin/python -m validation analyze --run-ids-from reports/stability.json --known-posts reports/known-posts-resolved.json
+```
+
+`resolve-known` chỉ mở các link fixture bằng session local để lấy canonical ID/group; không gọi collector hay lấy lại group feed. Khi gặp checkpoint/session/rate-limit thì dừng, ghi kết quả partial vào `reports/known-posts-resolved.json` cùng `reports/fixture-resolution-status.json`, trả exit 1 để `&&` không chạy bước sau. Không có session thì không báo resolve thành công. Lệnh này giữ nguyên suite report và `validation-status.json`.
+
+`analyze` chạy offline, đọc danh sách `run_ids` từ report hiện tại **trước khi archive report đó**; chỉ xử lý đúng các raw run đã chọn và fixture mới đã resolve. `--run-ids` và `--run-ids-from` không dùng đồng thời. Metadata/raw gốc được giữ; `analysis_known_posts` trong run report và `evaluated_known_posts` trong stability ghi ground truth thực sự dùng khi phân tích. Exit 1 sau analyze vẫn có thể xuất hiện do lỗi collection từ run cũ, ví dụ lượt fbgql partial/network_error; báo cáo giữ nguyên lỗi đó.
 
 Link share không chứa post ID. Runner resolve bằng cùng session, chỉ nhận canonical/og:url hoặc redirect về permalink rõ ràng. Nhiều ID/không có ID => unresolved, không đoán từ caption hay ID profile. Xem `reports/known-posts-resolved.json`. Mỗi fixture chỉ được xác nhận cùng group khi canonical/permalink có numeric `/groups/<id>/posts/...` hoặc `/groups/<id>/permalink/...` trùng ID group của run; post ID riêng lẻ và group alias không numeric là group-unverified, còn share alias chưa resolve có dòng unresolved riêng. Numeric group khác được báo wrong-group và không tính vào recall.
 
@@ -72,7 +84,7 @@ Hai giới hạn tìm được bằng đọc source upstream đã pin:
 
 Phase 0.5 bọc transport Go để đọc raw GraphQL **trước** model; Python scope story vào group feed edge, giữ duplicate trong raw và dùng parser upstream cho field post. Cả hai thêm `image_candidates` có URL, width/height nếu có, source/path và `possible_type`/`type_evidence`. Normalized `images` vẫn là URL array để giữ compatibility; chi tiết ở `post.validation.image_candidates`.
 
-Extractor dựa vào kiểu Photo/Image và vị trí attachment/media, hỗ trợ nested/carousel/comet sections, không gom mọi URL trong response. Loại avatar/profile, link preview, thumbnail video/reel, recommendation và ảnh của shared original; chưa có bằng chứng loại post thì để unknown. Phần ảnh đã được kiểm thử trên response giả lập có cấu trúc GraphQL, **chưa khẳng định hoạt động/đủ ảnh trên các 5 link live**.
+Extractor dựa vào kiểu Photo/Image và vị trí attachment/media, hỗ trợ nested/carousel/comet sections, không gom mọi URL trong response. Loại avatar/profile, link preview, thumbnail video/reel, recommendation và ảnh của shared original; chưa có bằng chứng loại post thì để unknown. Phần ảnh đã được kiểm thử trên response giả lập có cấu trúc GraphQL, **chưa khẳng định hoạt động/đủ ảnh trên 6 link mới**.
 
 Handoff của 10 paired runs ghi nhận `fbgql` author presence 0% và không có bài chỉ xuất hiện ở fbgql. Vì vậy report mô tả fbgql hiện là comparison/audit signal trong mẫu đó; không thêm author suy đoán từ group/page hay shared original. Chỉ đánh giá lại nếu raw story hiện tại cung cấp author có liên hệ rõ với chính bài.
 

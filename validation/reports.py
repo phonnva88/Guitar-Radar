@@ -14,7 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from compare import field_presence, match_posts, safe_md, validate_normalized, write_markdown
 from normalizer import FACEBOOK_HOSTS, canonical_permalink, identity, timestamp, web_url, write_json
-from validation.ground_truth import assess_fixture
+from validation.ground_truth import RESOLUTION_ERRORS, assess_fixture, safe_source_url
 
 COLLECTORS = ("facebook-go", "fbgql")
 NAMES = {"facebook-go": "facebook_go", "fbgql": "fbgql"}
@@ -134,6 +134,11 @@ def _known_posts(known_posts):
         result.append({"post_id": pid, "url": safe_url, "key": key, "unresolved": unresolved_share and not pid,
                        "canonical": url or ("post:" + pid if pid and pid.isdigit() else None),
                        "verified_posted_at": verified_at, "expected_has_images": expected})
+        if source_url := safe_source_url(post.get("source_url")):
+            result[-1]["source_url"] = source_url
+        error = post.get("resolution_error")
+        if isinstance(error, str) and error in RESOLUTION_ERRORS:
+            result[-1]["resolution_error"] = error
     return result
 
 
@@ -518,6 +523,7 @@ def build_stability(runs: list[dict], known_posts: list[dict]) -> dict:
     return {"schema_version": 1, "phase": "0.5", "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "source": source, "group_id": group, "group_input": group_input, "window": bounds, "run_ids": run_ids,
             "metadata": [run["metadata"] for run in runs], "known_post_count": len(known),
+            "evaluated_known_posts": known,
             "facebook_go": metrics["facebook_go"], "fbgql": metrics["fbgql"],
             "matching": matching, "controlled_paired_runs": sum(paired_ok), "consistency": consistency,
             "collector_only": omissions, "health": health, "recommendation": recommendation, "answers": answers,

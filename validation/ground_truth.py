@@ -3,9 +3,24 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
-from normalizer import FACEBOOK_HOSTS, timestamp
+from normalizer import FACEBOOK_HOSTS, canonical_permalink, timestamp, web_url
+
+RESOLUTION_ERRORS = {"ambiguous_or_missing_canonical_post", "ambiguous_canonical_group", "network_error",
+                     "parse_error", "group_not_found", "group_not_accessible", "configuration_error", "unknown_error",
+                     "checkpoint_required", "rate_limited", "session_expired", "authentication_failed", "account_restricted"}
+
+
+def safe_source_url(value: object) -> str | None:
+    if not web_url(value):
+        return None
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or parsed.hostname not in FACEBOOK_HOSTS:
+        return None
+    if not canonical_permalink(value) and not re.fullmatch(r"/share/p/[A-Za-z0-9]+/?", parsed.path):
+        return None
+    return urlunsplit(("https", "www.facebook.com", parsed.path, "", ""))
 
 
 def numeric_group_from_url(value: object) -> str | None:

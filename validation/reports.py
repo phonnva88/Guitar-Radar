@@ -150,7 +150,7 @@ def _known_matches(expected, post):
     return bool(expected["canonical"] and expected["canonical"] == url)
 
 
-def _images(known, indexed, group_id, bounds):
+def _images(known, indexed, group_id, bounds, group_input=None):
     image_posts = [post for post in known if post["expected_has_images"]]
     records, text_only_observed = [], 0
     for expected in known:
@@ -158,7 +158,7 @@ def _images(known, indexed, group_id, bounds):
         ambiguous_matches = [item["post"] for item in indexed["ambiguous"]
                              if _known_matches(expected, item.get("post", {}))]
         has_observation = bool(matches or ambiguous_matches)
-        scope = assess_fixture(expected, group_id, bounds, observed=has_observation)
+        scope = assess_fixture(expected, group_id, bounds, observed=has_observation, group_input=group_input)
         if scope["group_status"] == "wrong_group":
             status = "wrong_group"
         elif scope["group_status"] == "group_unverified":
@@ -231,7 +231,7 @@ def _per_run(envelope, indexed, known):
             "window_complete": complete, "window": window,
             "field_presence": field_presence(posts), "field_presence_denominator": len(posts),
             "post_id_presence": sum(bool(identity(post.get("post_id"))) for post in posts) / len(posts) if posts else None,
-            "image_validation": _images(known, indexed, envelope.get("group_id"), window),
+            "image_validation": _images(known, indexed, envelope.get("group_id"), window, envelope.get("group_input")),
             "library_commit": envelope.get("library_commit")}
 
 
@@ -387,7 +387,7 @@ def _ready_reasons(collector, metrics, consistency, source, group, paired_count,
     if scope.get("unresolved_alias", 0):
         reasons.append("Some supplied share aliases remain unresolved and cannot verify their group.")
     if scope.get("group_unverified", 0):
-        reasons.append("Some supplied fixtures have no verified numeric group ID, such as post-ID-only entries.")
+        reasons.append("Some supplied fixtures could not be verified against the resolved target group ID or its recorded input alias.")
     if scope.get("timestamp_unknown", 0):
         reasons.append("Some same-group fixtures have unknown timestamps and cannot be assigned to the fixed window.")
     if metrics["images"]["supplied_expected_image_observations"] and metrics["images"]["eligible_text_only_observations"] == 0:
@@ -428,13 +428,14 @@ def build_stability(runs: list[dict], known_posts: list[dict]) -> dict:
         group_input = metadata.get("group_input")
         run_ids.append(rid)
         for collector in COLLECTORS:
-            envelope = validate_normalized(run.get("collectors", {}).get(collector), collector)
+            envelope = dict(validate_normalized(run.get("collectors", {}).get(collector), collector))
             if envelope["run_id"] != rid or identity(envelope["group_id"]) != group:
                 raise ValueError("Collector metadata does not match its suite run")
             if envelope.get("source", "unknown") != current_source:
                 raise ValueError("Collector data source does not match run metadata")
             if _bounds(envelope.get("window")) != bounds:
                 raise ValueError("Collector window does not match suite metadata")
+            envelope["group_input"] = metadata.get("group_input")
             for post in envelope["posts"]:
                 observed_time = timestamp(post.get("posted_at"))
                 if not observed_time or not (_time_key(bounds["from"]) <= _time_key(observed_time) <= _time_key(bounds["to"])):
@@ -529,7 +530,7 @@ def build_stability(runs: list[dict], known_posts: list[dict]) -> dict:
             "collector_only": omissions, "health": health, "recommendation": recommendation, "answers": answers,
             "limitations": ["Coverage uses only the union observed in complete paired samples; Facebook ground truth is unavailable.",
                             "Field presence does not establish complete captions or complete image galleries.",
-            "Image detection recall uses only user-supplied image fixtures verified for this numeric group and fixed window; invalid-scope fixtures are reported separately.",
+            "Image detection recall uses only user-supplied image fixtures verified for the resolved target group and fixed window; invalid-scope fixtures are reported separately.",
             "Conditional image recall excludes eligible fixtures not observed; missing in-window posts and observed extraction failures are reported separately.",
                             "Duration summaries include only successful live runs, not failed startup or synthetic timings.",
                             "Unexpected set/field changes require review; Facebook can edit, delete or reorder posts.",

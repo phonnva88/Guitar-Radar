@@ -36,15 +36,50 @@ def numeric_group_from_url(value: object) -> str | None:
     return match.group(1) if match else None
 
 
-def assess_fixture(item: dict, group_id: object, bounds: dict | None, *, observed: bool) -> dict:
+def group_alias_from_permalink(value: object) -> str | None:
+    """Return a nonnumeric group handle only from a canonical group post URL."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if not parsed.hostname or parsed.hostname.lower() not in FACEBOOK_HOSTS:
+        return None
+    match = re.fullmatch(r"/groups/([A-Za-z0-9._-]+)/(?:posts|permalink)/[^/]+/?", parsed.path)
+    return match.group(1) if match and not match.group(1).isdigit() else None
+
+
+def group_alias_from_input(value: object) -> str | None:
+    """Read the alias recorded for the target group used by a live run."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if parsed.scheme != "https" or not parsed.hostname or parsed.hostname.lower() not in FACEBOOK_HOSTS:
+        return None
+    match = re.fullmatch(r"/groups/([A-Za-z0-9._-]+)/?", parsed.path)
+    return match.group(1) if match and not match.group(1).isdigit() else None
+
+
+def assess_fixture(item: dict, group_id: object, bounds: dict | None, *, observed: bool,
+                   group_input: object = None) -> dict:
     """Return independently checkable group/window scope for one fixture."""
     fixture_group = numeric_group_from_url(item.get("url"))
     target_group = str(group_id) if isinstance(group_id, (str, int)) and str(group_id).isdigit() else None
+    fixture_alias = group_alias_from_permalink(item.get("url"))
+    target_alias = group_alias_from_input(group_input)
     if fixture_group and target_group:
         if fixture_group == target_group:
             group_status, group_reason = "verified_same_group", "numeric_group_id_matches"
         else:
             group_status, group_reason = "wrong_group", "numeric_group_id_mismatch"
+    elif target_group and fixture_alias and target_alias and fixture_alias.casefold() == target_alias.casefold():
+        # Bind a canonical alias permalink to the numeric target only when the
+        # same alias was recorded as the input used to resolve the live run.
+        group_status, group_reason = "verified_same_group", "group_alias_matches_run_input"
     else:
         group_status = "group_unverified"
         if item.get("unresolved"):
@@ -75,7 +110,8 @@ def assess_fixture(item: dict, group_id: object, bounds: dict | None, *, observe
 
     eligible = group_status == "verified_same_group" and window_status in {"observed_in_window", "not_observed"}
     return {"group_status": group_status, "group_reason": group_reason,
-            "fixture_group_id": fixture_group, "window_status": window_status,
+            "fixture_group_id": fixture_group, "fixture_group_alias": fixture_alias,
+            "window_status": window_status,
             "verified_posted_at": verified_at, "eligible_for_window": eligible,
             "unexpected_observation_outside_verified_window": window_status == "outside_window_verified" and observed}
 

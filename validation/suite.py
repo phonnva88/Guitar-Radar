@@ -17,7 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 from compare import build_report, markdown_report, write_markdown
 from normalizer import canonical_permalink, normalize_run, timestamp, write_json
 from scripts import phase0
-from validation.ground_truth import RESOLUTION_ERRORS, assess_fixture, numeric_group_from_url
+from validation.ground_truth import RESOLUTION_ERRORS, assess_fixture, group_alias_from_permalink, numeric_group_from_url
 
 ROOT = phase0.ROOT
 COLLECTORS = phase0.COLLECTORS
@@ -194,7 +194,7 @@ def post_key(post: dict, group: str | None) -> str | None:
     return "post:" + str(post["post_id"]) if post.get("post_id") else canonical_permalink(post.get("url"), group)
 
 
-def image_validation(run: dict, known: list[dict]) -> dict:
+def image_validation(run: dict, known: list[dict], group_input: str | None = None) -> dict:
     index = {}
     for post in run["posts"]:
         key = post_key(post, run["group_id"])
@@ -207,7 +207,8 @@ def image_validation(run: dict, known: list[dict]) -> dict:
         counts = [len(p["images"]) for p in observations]
         inconsistent = len(set(counts)) > 1
         detected = bool(counts) and all(count > 0 for count in counts)
-        scope = assess_fixture(item, run.get("group_id"), run.get("window"), observed=bool(observations))
+        scope = assess_fixture(item, run.get("group_id"), run.get("window"), observed=bool(observations),
+                               group_input=group_input)
         if scope["group_status"] == "wrong_group":
             status = "wrong_group"
         elif scope["group_status"] == "group_unverified":
@@ -372,7 +373,7 @@ def finish_run(metadata: dict, runs: dict, known: list[dict], directory: Path | 
     value = {"metadata": metadata, "collectors": runs, "comparison": comparison,
              "analysis_known_posts": known,
              "diagnostics": diagnostics(comparison, runs),
-             "images": {name: image_validation(run, known) for name, run in runs.items()}}
+             "images": {name: image_validation(run, known, metadata.get("group_input")) for name, run in runs.items()}}
     write_json(ROOT / "reports/runs" / (metadata["run_id"] + ".json"), value)
     if directory:
         write_json(directory / "comparison.json", comparison)
@@ -468,15 +469,19 @@ def resolve_fixtures(args) -> int:
     except phase0.RunError as exc:
         stop = exc
     write_json(output, known)
-    resolved = sum(not item.get("unresolved") and numeric_group_from_url(item.get("url")) is not None for item in known)
+    resolved = sum(not item.get("unresolved") and bool(item.get("post_id")) and
+                   (numeric_group_from_url(item.get("url")) is not None or
+                    group_alias_from_permalink(item.get("url")) is not None) for item in known)
+    numeric_resolved = sum(not item.get("unresolved") and numeric_group_from_url(item.get("url")) is not None for item in known)
     failed = bool(stop or resolved != len(known))
     write_json(status_path, {"status": "incomplete" if failed else "completed", "finished_at": phase0.now(),
-                             "fixtures": len(known), "resolved_with_numeric_group": resolved,
+                             "fixtures": len(known), "resolved_with_group_permalink": resolved,
+                             "resolved_with_numeric_group": numeric_resolved,
                              "stop_code": stop.code if stop else None, "feed_collection_started": False})
     if stop:
         code = stop.code if stop.code in STOP_HINTS else "authentication_failed"
         print(f"[validation] STOP: {code}. {STOP_HINTS[code]}", file=sys.stderr)
-    print(f"[validation] Fixture links with numeric group: {resolved}/{len(known)}. No feed collection. See {output}.", file=sys.stderr)
+    print(f"[validation] Fixture links with canonical group permalink: {resolved}/{len(known)}. No feed collection. See {output}.", file=sys.stderr)
     return int(failed)
 
 

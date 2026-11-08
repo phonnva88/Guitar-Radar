@@ -2,6 +2,8 @@
 
 **Status: MVP implemented following the user's request to start Phase 1. Local live pilot pending.**
 
+Current priority after the user's clarification: verify the Facebook crawler through an inspection UI before adding business selection rules. Code is split into `facebook_crawler` (acquisition) and `data_filter` (offline normalization/validation); `radar` provides orchestration, storage, and inspection. See [collector-verification.md](collector-verification.md). No guitar/price classification or new automatic exclusion rules are introduced.
+
 ## Context
 
 Guitar Radar aims to follow guitar-related Facebook groups, collect posts, identify reposts across groups, and present one clean feed. Phase 0.5 completed a live validation of the collectors and reported `READY FOR PHASE 1` for the observed sample. `facebook-go` is the primary candidate; `fbgql` remains useful for comparison and audit. The benchmark is a bounded sample, not a production reliability guarantee.
@@ -65,7 +67,7 @@ Enforce uniqueness by `(platform, group_id, post_id)`. Repeated collection shoul
 - One sequential worker that invokes the validated collector and stores normalized results transactionally.
 - A basic browser UI for the owner; protect it with authentication or keep it behind a private network boundary before exposing it beyond the developer machine.
 - Configuration and Facebook session material stay outside source control. Never log cookies, session tokens, or authorization headers.
-- Keep raw/debug data disabled by default in application operation. If enabled for diagnosis, sanitize it and apply short retention.
+- Keep full HTTP/GraphQL debug disabled. Store sanitized structured collector output and normalized snapshots per run for the inspection UI; include them in database backup/retention planning.
 
 Selected implementation: Python FastAPI reusing the validated normalizer, a static HTML/CSS/JavaScript frontend, PostgreSQL 16, and an integrated sequential worker (or a separate worker process). Owner access uses generated HTTP Basic credentials on loopback by default. Remote hosting requires HTTPS/private networking. There is no Redis or distributed queue.
 

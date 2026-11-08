@@ -2,8 +2,9 @@
 
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = {tab: "feed", groups: [], groupsLoaded: false, page: 1, feed: null, paused: false, feedRequest: 0};
+  const state = {tab: "audit", groups: [], groupsLoaded: false, page: 1, feed: null, paused: false, feedRequest: 0};
   const pageInfo = {
+    audit: ["KIỂM TRA TỪNG NGUỒN DỮ LIỆU", "Bộ cào đã thu được những gì?", "Xem từng lượt, đối chiếu bài đã biết và kiểm tra thay đổi trong cùng cửa sổ thời gian."],
     feed: ["TẤT CẢ NGUỒN, MỘT NƠI", "Nhịp mới của cộng đồng.", "Những bài đăng bạn quan tâm, được tập hợp gọn gàng."],
     groups: ["CÁC NGUỒN BẠN TIN CẬY", "Theo dõi đúng cộng đồng.", "Quản lý các nhóm và chủ động thu thập khi cần."],
     duplicates: ["ÍT LẶP LẠI, DỄ THEO DÕI", "Xem lại trước khi gom bài.", "Bạn quyết định những bài nào thực sự là cùng một nội dung."],
@@ -137,12 +138,13 @@
       });
     } catch (e) { failed(target, e, loadDuplicates); }
   }
-  async function refresh() { await Promise.allSettled([loadGroups(), loadStatus()]); if (state.tab === "feed") await loadFeed(); else if (state.tab === "runs") await loadRuns(); else if (state.tab === "duplicates") await loadDuplicates(); }
+  async function refresh() { await Promise.allSettled([loadGroups(), loadStatus()]); if (state.tab === "audit") document.dispatchEvent(new Event("radar:audit-refresh")); else if (state.tab === "feed") await loadFeed(); else if (state.tab === "runs") await loadRuns(); else if (state.tab === "duplicates") await loadDuplicates(); }
   function selectTab(tab) {
     state.tab = tab; for (const button of document.querySelectorAll("[data-tab]")) { const selected = button.dataset.tab === tab; button.classList.toggle("active", selected); if (selected) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current"); }
     for (const panel of document.querySelectorAll(".tab-panel")) panel.hidden = panel.id !== `panel-${tab}`;
     const [kicker,title,description] = pageInfo[tab]; $("page-kicker").textContent = kicker; $("page-title").textContent = title; $("page-description").textContent = description; document.title = `${title} — Guitar Radar`;
-    if (tab === "runs") loadRuns(); else if (tab === "duplicates") loadDuplicates();
+    document.dispatchEvent(new CustomEvent("radar:tab", {detail: tab}));
+    if (tab === "feed") loadFeed(); else if (tab === "runs") loadRuns(); else if (tab === "duplicates") loadDuplicates();
   }
   for (const button of document.querySelectorAll("[data-tab]")) button.addEventListener("click", () => selectTab(button.dataset.tab));
   $("refresh-button").addEventListener("click", (e) => action(e.currentTarget, refresh));

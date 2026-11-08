@@ -35,6 +35,20 @@ class DuplicateConfirmation(BaseModel):
     post_ids: list[int] = Field(min_length=2, max_length=30)
 
 
+class CollectionRequest(BaseModel):
+    start: datetime | None = None
+    end: datetime | None = None
+
+
+class KnownPostCreate(BaseModel):
+    group_id: int = Field(ge=1)
+    url: str = Field(min_length=1, max_length=400)
+    expected_has_images: bool | None = None
+    verified_posted_at: datetime | None = None
+    expected_text: str | None = Field(None, max_length=100000)
+    expected_image_count: int | None = Field(None, ge=0, le=1000)
+
+
 def create_app(settings: Settings, database: Database | None = None) -> FastAPI:
     db = database or Database(settings.database_url)
     app = FastAPI(title="Guitar Radar", docs_url=None, redoc_url=None, openapi_url=None)
@@ -130,8 +144,11 @@ def create_app(settings: Settings, database: Database | None = None) -> FastAPI:
         return db.update_group(group_id, body.enabled)
 
     @app.post("/api/groups/{group_id}/collect", status_code=202)
-    def collect(group_id: int):
-        return db.enqueue(group_id)
+    def collect(group_id: int, body: CollectionRequest | None = None):
+        body = body or CollectionRequest()
+        if body.start is None and body.end is None:
+            return db.enqueue(group_id)
+        return db.enqueue(group_id, start=body.start, end=body.end)
 
     @app.post("/api/collection/resume")
     def resume():
@@ -162,6 +179,38 @@ def create_app(settings: Settings, database: Database | None = None) -> FastAPI:
         if len(set(body.post_ids)) != len(body.post_ids):
             raise HTTPException(422, "Danh sách có ID trùng.")
         return db.confirm_duplicate(body.post_ids)
+
+    @app.get("/api/audit")
+    def audit(group_id: int | None = Query(None, ge=1)):
+        from radar.audit import audit_summary
+        return audit_summary(db, group_id=group_id)
+
+    @app.get("/api/audit/runs/{run_id}")
+    def audit_run(run_id: int):
+        from radar.audit import run_details
+        return run_details(db, run_id)
+
+    @app.post("/api/audit/runs/{run_id}/repeat", status_code=202)
+    def repeat_run(run_id: int):
+        from radar.audit import run_details
+        detail = run_details(db, run_id)
+        bounds = detail.get("window") or {}
+        if not bounds.get("from") or not bounds.get("to"):
+            raise HTTPException(409, "Lượt này chưa có cửa sổ thời gian để lặp lại.")
+        return db.enqueue(detail["run"]["group_id"], start=bounds["from"], end=bounds["to"])
+
+    @app.post("/api/audit/known-posts", status_code=201)
+    def known_post(body: KnownPostCreate):
+        from radar.audit import add_known_post
+        when = body.verified_posted_at.isoformat() if body.verified_posted_at else None
+        return add_known_post(db, body.group_id, body.url, body.expected_has_images, when,
+                              expected_text=body.expected_text, expected_image_count=body.expected_image_count)
+
+    @app.post("/api/audit/import")
+    def import_runs():
+        from radar.config import ROOT
+        from radar.import_validation import import_validation_runs
+        return import_validation_runs(db, ROOT / "reports/stability.json", ROOT / "data/runs")
 
     app.mount("/static", StaticFiles(directory=STATIC, check_dir=False), name="static")
     return app

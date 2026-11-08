@@ -2,6 +2,8 @@
 
 Phase 1 có ứng dụng web riêng tư, PostgreSQL, worker thu thập tuần tự, lịch tùy chọn và duyệt bài trùng thủ công. `facebook-go` là collector chính. Python API dùng chung normalizer với POC; giao diện HTML/CSS/JavaScript không cần Node hay frontend build. `fbgql` tiếp tục dùng qua công cụ validation khi cần đối chiếu.
 
+Ưu tiên mới là [giao diện kiểm chứng bộ cào](collector-verification.md). Module `facebook_crawler` tạo output đầu vào, module `data_filter` xử lý offline; worker nối hai module. Bản chụp collector đã loại bí mật và dữ liệu chuẩn hóa được lưu theo từng lượt để kiểm tra.
+
 ```mermaid
 flowchart LR
   Owner[Trình duyệt của chủ ứng dụng] --> API[API và giao diện]
@@ -61,7 +63,7 @@ Cùng post ID/permalink được lưu đúng một nguồn bài. Bài từ các 
 
 Ứng dụng mặc định chỉ lắng nghe `127.0.0.1` và yêu cầu HTTP Basic cho giao diện/API. Nếu chạy trên VPS hoặc cho người khác truy cập, dùng HTTPS ở reverse proxy/private network, cấu hình `RADAR_ALLOWED_HOSTS` và bind host phù hợp. Không đưa Basic Auth qua HTTP công khai. Phase 1 dành cho một chủ ứng dụng, chưa có đăng ký/multi-tenant.
 
-API không hiển thị session và không bật CORS; thao tác ghi phải có header `X-Radar-Request: 1` từ giao diện. Database lưu bài và metadata ảnh, không lưu cookie, HTTP headers hay raw bootstrap. Ảnh được tải trực tiếp bởi trình duyệt từ URL nguồn, có thể hết hạn; link bài Facebook vẫn được giữ. Không tải về/rehost gallery.
+API không hiển thị session và không bật CORS; thao tác ghi phải có header `X-Radar-Request: 1` từ giao diện. Database lưu bài, metadata ảnh và bản chụp output collector/normalized đã loại bí mật theo lượt; không lưu cookie, HTTP headers hay raw bootstrap. Ảnh được tải trực tiếp bởi trình duyệt từ URL nguồn, có thể hết hạn; link bài Facebook vẫn được giữ. Không tải về/rehost gallery.
 
 ## Sao lưu và khôi phục
 

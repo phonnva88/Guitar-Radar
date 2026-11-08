@@ -10,7 +10,7 @@ from radar.config import Settings, init_config
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Guitar Radar Phase 1 owner application")
-    parser.add_argument("command", choices=("init-config", "migrate", "bootstrap", "serve", "worker"))
+    parser.add_argument("command", choices=("init-config", "migrate", "bootstrap", "serve", "worker", "import-validation"))
     parser.add_argument("--no-worker", action="store_true", help="Serve API only; use a separate worker process")
     args = parser.parse_args(argv)
     if args.command == "init-config":
@@ -32,6 +32,12 @@ def main(argv=None):
             print("Database ready. Pilot group configured; no Facebook request was made.")
         elif args.command == "migrate":
             print("Database schema ready.")
+        elif args.command == "import-validation":
+            from radar.config import ROOT
+            from radar.import_validation import import_validation_runs
+            result = import_validation_runs(db, ROOT / "reports/stability.json", ROOT / "data/runs")
+            print(f"Imported {result['imported']} saved runs; skipped {result['skipped']}; errors {len(result['errors'])}. No Facebook requests.")
+            return int(bool(result["errors"]))
         else:
             worker = Worker(db, interval_seconds=settings.interval_seconds, lookback_hours=settings.lookback_hours)
             if args.command == "worker":

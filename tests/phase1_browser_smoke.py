@@ -35,6 +35,7 @@ def main():
         db = Database(make_conninfo(dsn, options=f"-c search_path={schema}"))
         db.migrate()
         duplicate = "Bán Fender Telecaster Nhật, nguyên bản, xem đàn và giao dịch trực tiếp. Dữ liệu thử."
+        saved = []
         for n in (101, 202):
             group = db.create_group(f"Nhóm demo {n}", f"https://www.facebook.com/groups/{n}")
             run = db.enqueue(group["id"])
@@ -45,8 +46,17 @@ def main():
             if n == 101:
                 posts.append({"post_id": "10101", "group_id": "101", "url": "https://www.facebook.com/groups/101/posts/10101/",
                               "text": "Tìm chỗ sửa guitar acoustic. Dữ liệu thử riêng tư.", "images": [], "posted_at": "2026-11-07T03:00:00Z"})
-            db.complete_run(run["id"], {"group_id": str(n), "source": "synthetic", "status": "success", "errors": [],
-                                       "window": {"complete": True}, "posts": posts})
+            envelope = {"schema_version": 1, "collector": "facebook-go", "run_id": f"browser-{n}",
+                        "group_id": str(n), "source": "synthetic", "status": "success", "errors": [],
+                        "window": {"from": "2026-11-06T00:00:00Z", "to": "2026-11-09T00:00:00Z", "complete": True, "stop_reason": "feed_exhausted"},
+                        "posts": posts}
+            raw = {**envelope, "posts": [{"id": post["post_id"], "message": post["text"], "createdAt": post["posted_at"]} for post in posts]}
+            db.complete_run(run["id"], envelope, raw=raw)
+            saved.append((group, envelope, raw))
+        group, envelope, raw = saved[0]
+        repeated = db.enqueue(group["id"])
+        db.claim_next()
+        db.complete_run(repeated["id"], {**envelope, "run_id": "browser-repeat"}, raw={**raw, "run_id": "browser-repeat"})
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -70,6 +80,31 @@ def main():
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(f"http://127.0.0.1:{port}")
+            expect(page.locator("#panel-audit")).to_be_visible()
+            expect(page.locator(".audit-run-card")).to_have_count(3)
+            expect(page.locator("#audit-runs")).to_contain_text("Không đổi trong cửa sổ đã quan sát")
+            page.locator(".audit-known-section > summary").click()
+            page.locator("#audit-known-group").select_option(str(saved[0][0]["id"]))
+            page.locator("#audit-known-url").fill("https://www.facebook.com/groups/101/posts/99999/")
+            page.locator("#audit-known-time").fill("2026-11-08T11:00")
+            page.locator("#audit-known-images").select_option("true")
+            page.locator("#audit-known-image-count").fill("2")
+            page.locator("#audit-known-text").fill("Nội dung chuẩn được xác nhận độc lập để kiểm tra lỗi thiếu bài.")
+            page.locator("#audit-known-form button").click()
+            expect(page.locator("#audit-known-count")).to_have_text("(1)")
+            page.locator(".audit-run-card").first.get_by_role("button", name="Xem từng bài").click()
+            expect(page.locator("#audit-run-details")).to_contain_text("Chưa thấy trong cửa sổ")
+            page.locator(".audit-post").first.locator("summary").first.click()
+            expect(page.locator("#audit-run-details .audit-post-text").first).to_contain_text("Fender")
+            page.locator("#audit-run-details .audit-raw").first.locator("summary").click()
+            expect(page.locator("#audit-run-details .audit-raw pre").first).to_contain_text('"message"')
+            ROOT.joinpath("reports").mkdir(exist_ok=True)
+            page.screenshot(path=str(ROOT / "reports/collector-audit-desktop.png"), full_page=True)
+            page.locator(".audit-run-card").first.get_by_role("button", name="Lặp lại cùng cửa sổ").click()
+            expect(page.locator("#audit-notice")).to_contain_text("Đã xếp lượt")
+            repeat = db.list_runs()[0]
+            assert repeat["status"] == "queued" and repeat["requested_from"].isoformat().startswith("2026-11-06")
+            page.locator('[data-tab="feed"]').click()
             expect(page.locator("#feed-list .post-card")).to_have_count(3)
             ROOT.joinpath("reports").mkdir(exist_ok=True)
             page.screenshot(path=str(ROOT / "reports/phase1-desktop.png"), full_page=True)
@@ -103,9 +138,14 @@ def main():
             expect(page.locator("#feed-list .post-card")).to_have_count(2)
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Mobile overflow"
             page.screenshot(path=str(ROOT / "reports/phase1-mobile.png"), full_page=True)
+            page.locator('[data-tab="audit"]').click()
+            expect(page.locator("#panel-audit")).to_be_visible()
+            expect(page.locator(".audit-run-card")).to_have_count(5)
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Audit mobile overflow"
+            page.screenshot(path=str(ROOT / "reports/collector-audit-mobile.png"), full_page=True)
             assert not errors, errors
             browser.close()
-        print("PASS: real database, authenticated browser feed/search/date/group creation/queue/manual merge/mobile; no Facebook requests")
+        print("PASS: real database, authenticated audit/known-post/raw-details/fixed-window repeat/feed/search/merge/mobile; no Facebook requests")
     finally:
         if server:
             server.should_exit = True

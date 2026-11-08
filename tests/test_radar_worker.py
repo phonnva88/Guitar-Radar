@@ -32,15 +32,15 @@ class FakeDatabase:
     def claim_next(self):
         return self.queued.pop(0) if self.queued else None
 
-    def complete_run(self, run_id, envelope):
+    def complete_run(self, run_id, envelope, **kwargs):
         self.completed.append((run_id, envelope))
         errors = envelope.get("errors", [])
         if any(e.get("code") == "checkpoint_required" for e in errors):
             self.paused = "checkpoint_required"
 
-    def fail_run(self, run_id, code):
+    def fail_run(self, run_id, code, **kwargs):
         self.failed.append((run_id, code))
-        if code == "session_expired":
+        if code in {"session_expired", "checkpoint_required"}:
             self.paused = code
 
     def enqueue(self, group_id):
@@ -71,6 +71,33 @@ class FakeDatabase:
 
 
 class WorkerTests(unittest.TestCase):
+    def test_raw_acquisition_and_offline_processing_are_distinct_steps(self):
+        db = FakeDatabase()
+        raw = {"posts": [{"id": "11", "message": "source-shaped"}]}
+        normalized = {"posts": [{"post_id": "11", "text": "source-shaped"}], "errors": []}
+        crawler = Mock(return_value=raw)
+        processor = Mock(return_value=normalized)
+        worker = Worker(db, crawler, processor=processor)
+        self.assertTrue(worker.process_one())
+        processor.assert_called_once_with(raw)
+        self.assertEqual(db.completed, [(1, normalized)])
+        self.assertEqual(raw["posts"][0], {"id": "11", "message": "source-shaped"})
+
+    def test_processing_failure_closes_run_without_ingesting_raw(self):
+        db = FakeDatabase()
+        worker = Worker(db, Mock(return_value={"posts": []}), processor=Mock(side_effect=ValueError("SECRET")))
+        self.assertTrue(worker.process_one())
+        self.assertEqual(db.failed, [(1, "parse_error")])
+        self.assertFalse(db.completed)
+
+    def test_processing_error_cannot_hide_a_security_stop(self):
+        db = FakeDatabase()
+        raw = {"posts": [], "errors": [{"code": "checkpoint_required"}]}
+        worker = Worker(db, Mock(return_value=raw), processor=Mock(side_effect=ValueError("parse failure")))
+        self.assertTrue(worker.process_one())
+        self.assertEqual(db.failed, [(1, "checkpoint_required")])
+        self.assertFalse(worker.process_one())
+
     def test_pause_does_not_claim_or_collect(self):
         db = FakeDatabase(paused="checkpoint_required")
         collector = Mock()
@@ -82,7 +109,7 @@ class WorkerTests(unittest.TestCase):
         db = FakeDatabase()
         envelope = {"status": "partial", "posts": [{"post_id": "11"}],
                     "errors": [{"code": "checkpoint_required"}]}
-        worker = Worker(db, Mock(return_value=envelope))
+        worker = Worker(db, Mock(return_value=envelope), processor=lambda raw: raw)
         self.assertTrue(worker.process_one())
         self.assertEqual(db.completed, [(1, envelope)])
         self.assertFalse(worker.process_one())
@@ -104,14 +131,14 @@ class WorkerTests(unittest.TestCase):
     def test_storage_validation_failure_closes_claimed_run(self):
         db = FakeDatabase()
         db.complete_run = Mock(side_effect=ValueError("invalid source payload SECRET"))
-        worker = Worker(db, Mock(return_value={"posts": []}))
+        worker = Worker(db, Mock(return_value={"posts": []}), processor=lambda raw: raw)
         self.assertTrue(worker.process_one())
         self.assertEqual(db.failed, [(1, "parse_error")])
 
     def test_uncertain_database_result_stops_worker_without_raw_message(self):
         db = FakeDatabase()
         db.complete_run = Mock(side_effect=RuntimeError("postgres password=SECRET"))
-        worker = Worker(db, Mock(return_value={"posts": []}))
+        worker = Worker(db, Mock(return_value={"posts": []}), processor=lambda raw: raw)
         with self.assertRaisesRegex(CollectionFailure, "^unknown_error$"):
             worker.process_one()
         self.assertTrue(worker._stop.is_set())
@@ -286,7 +313,7 @@ class CollectorTests(unittest.TestCase):
             except CollectionFailure as exc:
                 failures.append(exc.code)
 
-        with patch("radar.worker.subprocess.Popen", side_effect=start):
+        with patch("facebook_crawler.collector.subprocess.Popen", side_effect=start):
             thread = threading.Thread(target=collect)
             thread.start()
             try:

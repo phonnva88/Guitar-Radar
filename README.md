@@ -193,3 +193,5 @@ Không khẳng định `vegmpremium` public hay account đã join khi chưa xác
 - Feed live thay đổi giữa hai collector tuần tự; số trang bằng nhau chưa chắc cùng khoảng thời gian/số post. Chỉ báo khác biệt trong mẫu quan sát, không tự chọn collector tốt nhất.
 
 Phase 0 dừng tại đây, không bắt đầu Phase 1.
+
+Bản đề xuất phạm vi Phase 1 (chưa triển khai): [docs/phase1-scope.md](docs/phase1-scope.md).

@@ -498,12 +498,17 @@ def build_stability(runs: list[dict], known_posts: list[dict]) -> dict:
         fbgql_role = "No additional posts were observed in this sample; its current value is a comparison/audit signal."
     else:
         fbgql_role = "Some posts appeared only in fbgql; review their saved evidence before assigning fallback value."
+    fbgql_metrics = metrics["fbgql"]
+    error_word = "error" if fbgql_metrics["errors"] == 1 else "errors"
+    fbgql_run_summary = (f"Collection succeeded in {fbgql_metrics['success_runs']}/{fbgql_metrics['runs']} runs; "
+                         f"{fbgql_metrics['complete_window_runs']}/{fbgql_metrics['runs']} windows completed; "
+                         f"{fbgql_metrics['errors']} collection {error_word}.") if fbgql_metrics["runs"] else "No fbgql runs were available."
     answers = {
         "A": {"question": "Does facebook-go have enough data for Guitar Radar?", "answer": health["facebook_go"]["status"], "evidence": health["facebook_go"]["blockers"]},
         "B": {"question": "Does image extraction work?", "answer": "Verified on all eligible, user-confirmed known-image observations" if go["images"]["expected_image_observations"] > 0 and go["images"]["image_detection_recall"] == 1.0 and source == "live" else "Not fully verified on live known-image posts",
               "evidence": {"facebook_go": go["images"], "fbgql": metrics["fbgql"]["images"]}},
         "C": {"question": "Is facebook-go stable across repeated runs?", "answer": consistency["facebook_go"]["status"], "evidence": {"runs": go["runs"], "success_rate": go["success_rate"], "complete_window_runs": go["complete_window_runs"]}},
-        "D": {"question": "What value does fbgql provide as fallback?", "answer": fbgql_role,
+        "D": {"question": "What value does fbgql provide as fallback?", "answer": f"{fbgql_role} {fbgql_run_summary}",
               "evidence": {"success_rate": metrics["fbgql"]["success_rate"], "only_fbgql_per_run": [item["only_fbgql"] for item in matching],
                            "additional_posts_in_sample": fbgql_only_total, "field_presence": metrics["fbgql"]["field_presence"]}},
         "E": {"question": "Does facebook-go systematically miss a post type?", "answer": "Repeated collector-only evidence requires investigation" if go_missing["repeated_missing_identities"] else "No systematic omission established by this sample; absence of evidence is not proof of complete coverage",

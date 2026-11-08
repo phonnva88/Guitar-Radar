@@ -61,6 +61,7 @@ class ValidationReportTests(unittest.TestCase):
         self.assertEqual(result["recommendation"]["phase1_status"], "READY FOR PHASE 1")
         self.assertEqual(set(result["answers"]), set("ABCDEF"))
         self.assertIn("author data was absent", result["answers"]["D"]["answer"])
+        self.assertIn("succeeded in 3/3 runs", result["answers"]["D"]["answer"])
         self.assertEqual(result["answers"]["D"]["evidence"]["additional_posts_in_sample"], 0)
         self.assertEqual(result["facebook_go"]["per_run"][0]["rows_collected"], 3)
         self.assertEqual(result["facebook_go"]["per_run"][0]["in_window_posts"], 2)
@@ -91,6 +92,16 @@ class ValidationReportTests(unittest.TestCase):
         self.assertEqual(result["facebook_go"]["avg_duration_ms"], 100)
         self.assertEqual(result["facebook_go"]["errors"], 1)
         self.assertIsNone(result["recommendation"]["primary"])
+
+    def test_fbgql_fallback_assessment_includes_failed_run_count(self):
+        runs = suite()
+        failed = runs[1]["collectors"]["fbgql"]
+        failed.update(status="failed", errors=[{"code": "network_error"}], duration_ms=1, posts=[])
+        result = build_stability(runs, KNOWN)
+        answer = result["answers"]["D"]["answer"]
+        self.assertIn("succeeded in 2/3 runs", answer)
+        self.assertIn("2/3 windows completed", answer)
+        self.assertIn("1 collection error", answer)
 
     def test_missing_known_posts_differ_from_extraction_failures(self):
         runs = suite()

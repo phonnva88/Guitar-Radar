@@ -1,12 +1,12 @@
 # Phase 1 — Proposed MVP Scope
 
-**Status: Draft for product review. No Phase 1 implementation has started.**
+**Status: MVP implemented following the user's request to start Phase 1. Local live pilot pending.**
 
 ## Context
 
 Guitar Radar aims to follow guitar-related Facebook groups, collect posts, identify reposts across groups, and present one clean feed. Phase 0.5 completed a live validation of the collectors and reported `READY FOR PHASE 1` for the observed sample. `facebook-go` is the primary candidate; `fbgql` remains useful for comparison and audit. The benchmark is a bounded sample, not a production reliability guarantee.
 
-This document proposes the first usable application slice. It does not approve or implement the Phase 1 work by itself.
+This document records the MVP scope. Operational commands and the selected defaults are in [phase1-running.md](phase1-running.md).
 
 ## Product outcome
 
@@ -67,7 +67,7 @@ Enforce uniqueness by `(platform, group_id, post_id)`. Repeated collection shoul
 - Configuration and Facebook session material stay outside source control. Never log cookies, session tokens, or authorization headers.
 - Keep raw/debug data disabled by default in application operation. If enabled for diagnosis, sanitize it and apply short retention.
 
-The specific API framework, frontend framework, hosting location, and authentication provider remain open decisions. The MVP should not add Redis, a distributed queue, Kubernetes, or a multi-service deployment unless a measured need appears.
+Selected implementation: Python FastAPI reusing the validated normalizer, a static HTML/CSS/JavaScript frontend, PostgreSQL 16, and an integrated sequential worker (or a separate worker process). Owner access uses generated HTTP Basic credentials on loopback by default. Remote hosting requires HTTPS/private networking. There is no Redis or distributed queue.
 
 ## Out of scope for the first MVP
 
@@ -92,15 +92,15 @@ The specific API framework, frontend framework, hosting location, and authentica
 
 ## Delivery sequence
 
-1. Confirm the open product/hosting choices below.
+1. Use the recommended private/local defaults below for this MVP.
 2. Implement one vertical slice: one configured group, manual collection, PostgreSQL persistence, and a basic newest-first feed.
 3. Add repeat-safe scheduled collection and collection-health visibility.
 4. Add conservative duplicate candidates and manual confirmation.
 5. Pilot on real collections, review privacy/retention, and only then expand to more groups.
 
-## Decisions to confirm before implementation
+## Selected baseline and possible future alternatives
 
-Recommended defaults are shown first; these are proposals, not decisions already made.
+The recommended column is the implemented baseline. Alternatives require a subsequent change.
 
 | Decision | Recommended starting point | Alternative to decide |
 |---|---|---|
@@ -112,4 +112,4 @@ Recommended defaults are shown first; these are proposals, not decisions already
 | Media storage | Keep metadata/URLs and link to Facebook | Download/cache images, subject to rights and retention decisions |
 | Cross-post behavior | Candidate plus manual confirmation | Automatic grouping under stricter matching rules |
 
-The most important decisions before coding are where the app will run, whether anyone besides the owner needs access, and whether cross-post candidates should be included in the first feed release.
+Before wider deployment, decide the hosting/private-access boundary, retention requirements, and any broader multi-user or automatic cross-post behavior. These are outside the local owner-only MVP.

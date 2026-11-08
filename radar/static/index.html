@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <title>Guitar Radar — Feed của bạn</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Đến nội dung</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Điều hướng chính">
+      <a class="brand" href="/" aria-label="Guitar Radar trang chủ"><span class="brand-mark" aria-hidden="true">g<span>r</span></span><span>Guitar<span class="brand-second">Radar</span></span></a>
+      <div class="sidebar-label">BỘ SƯU TẬP CỦA BẠN</div>
+      <nav class="nav-list">
+        <button class="nav-item active" data-tab="feed" aria-current="page"><span class="nav-icon" aria-hidden="true">▤</span><span>Bảng tin</span><span class="nav-count" id="feed-count">—</span></button>
+        <button class="nav-item" data-tab="groups"><span class="nav-icon" aria-hidden="true">◎</span><span>Nhóm theo dõi</span><span class="nav-count" id="group-count">—</span></button>
+        <button class="nav-item" data-tab="duplicates"><span class="nav-icon" aria-hidden="true">▱</span><span>Bài có thể trùng</span></button>
+        <button class="nav-item" data-tab="runs"><span class="nav-icon" aria-hidden="true">◷</span><span>Lịch sử thu thập</span></button>
+      </nav>
+      <div class="sidebar-foot"><span class="private-dot" aria-hidden="true"></span><div>Không gian riêng tư<small>Dành cho chủ sở hữu</small></div></div>
+    </aside>
+    <main id="main" class="main" tabindex="-1">
+      <header class="topbar"><span class="eyebrow">LẮNG NGHE CỘNG ĐỒNG GUITAR</span><span class="owner-label"><span class="owner-avatar" aria-hidden="true">G</span>Không gian của bạn</span></header>
+      <div class="page-heading"><div><div class="title-kicker" id="page-kicker">TẤT CẢ NGUỒN, MỘT NƠI</div><h1 id="page-title">Nhịp mới của cộng đồng.</h1><p id="page-description">Những bài đăng bạn quan tâm, được tập hợp gọn gàng.</p></div><button id="refresh-button" class="button button-outline"><span aria-hidden="true">↻</span> Làm mới</button></div>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section id="collection-banner" class="collection-banner" aria-label="Trạng thái thu thập"><div class="collection-state"><span id="status-dot" class="status-dot" aria-hidden="true"></span><div><strong id="collection-title">Đang kiểm tra kết nối…</strong><p id="collection-description">Đọc trạng thái thu thập của bạn.</p></div></div><button id="resume-button" class="button button-dark" hidden>Tiếp tục thu thập</button></section>
+
+      <section id="panel-feed" class="tab-panel" aria-label="Bảng tin">
+        <div class="stats-row"><div class="stat"><span>BÀI TRONG BẢNG TIN</span><strong id="stat-posts">—</strong></div><div class="stat"><span>NHÓM ĐANG THEO DÕI</span><strong id="stat-groups">—</strong></div><div class="stat stat-wide"><span>THU THẬP THÀNH CÔNG GẦN NHẤT</span><strong id="stat-last-sync" class="stat-date">Chưa có dữ liệu</strong></div></div>
+        <form id="filter-form" class="filters" aria-label="Lọc bài đăng"><div class="search-field"><span aria-hidden="true">⌕</span><input id="search" name="q" type="search" placeholder="Tìm trong nội dung bài đăng…" aria-label="Tìm nội dung bài đăng" maxlength="200"><button class="button button-dark" type="submit">Tìm</button></div><div class="filter-row"><label>Nhóm<select id="filter-group"><option value="">Tất cả nhóm</option></select></label><label>Hình ảnh<select id="filter-images"><option value="">Tất cả bài</option><option value="true">Có ảnh</option><option value="false">Không có ảnh</option></select></label><label>Từ ngày (giờ Việt Nam)<input id="filter-start" type="date"></label><label>Đến ngày (giờ Việt Nam)<input id="filter-end" type="date"></label><button id="clear-filters" class="text-button" type="button">Xóa bộ lọc</button></div></form>
+        <div class="section-line"><h2>Bài đăng gần đây</h2><span id="feed-summary" class="muted">Đang tải…</span></div>
+        <div id="feed-list" class="feed-grid" aria-live="polite"></div>
+        <div id="pagination" class="pagination" hidden><button id="previous-page" class="button button-outline">← Trước</button><span id="page-label"></span><button id="next-page" class="button button-outline">Sau →</button></div>
+      </section>
+
+      <section id="panel-groups" class="tab-panel" aria-label="Nhóm theo dõi" hidden><div class="section-line"><h2>Thêm nguồn mới</h2><span class="muted">Chỉ những nhóm tài khoản có quyền đọc</span></div><form id="group-form" class="group-form"><label>Tên gợi nhớ<input id="group-name" required maxlength="120" placeholder="Ví dụ: Cộng đồng guitar"></label><label class="group-url-label">Đường dẫn hoặc ID nhóm Facebook<input id="group-url" required type="text" maxlength="300" placeholder="URL nhóm Facebook hoặc ID dạng số"></label><button class="button button-dark" type="submit">+ Thêm nhóm</button></form><div class="section-line"><h2>Nguồn của bạn</h2><span id="groups-summary" class="muted"></span></div><div id="groups-list" class="groups-list" aria-live="polite"></div></section>
+
+      <section id="panel-duplicates" class="tab-panel" aria-label="Bài có thể trùng" hidden><div class="help-note"><strong>Mỗi bài đăng đều giữ lại nguồn gốc.</strong><p>Các bài có nội dung giống hệt nhau được đề xuất để bạn xem lại. Chọn ít nhất hai bài, kiểm tra kỹ nội dung rồi xác nhận gom vào cùng một mục trong bảng tin.</p></div><div class="section-line"><h2>Cần bạn xem lại</h2><span id="duplicates-summary" class="muted"></span></div><div id="duplicates-list" class="duplicates-list" aria-live="polite"></div></section>
+
+      <section id="panel-runs" class="tab-panel" aria-label="Lịch sử thu thập" hidden><div class="section-line"><h2>Những lượt thu thập gần đây</h2><span class="muted">Kết quả và lỗi đều được giữ lại</span></div><div id="runs-list" class="runs-list" aria-live="polite"></div></section>
+      <footer class="page-footer"><span>Guitar Radar</span><span>Luôn kiểm tra thông tin tại bài đăng gốc.</span></footer>
+    </main>
+  </div>
+</body>
+</html>

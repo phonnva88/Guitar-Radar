@@ -33,6 +33,7 @@ echo 'Preparing Python virtual environment...'
 if [[ ! -x .venv/bin/python ]]; then python3 -m venv .venv; fi
 echo 'Installing pinned Python dependencies...'
 .venv/bin/python -m pip install -r collectors/fbgql/requirements.txt
+.venv/bin/python -m pip install -r radar/requirements.txt
 mkdir -p .bin
 echo 'Building facebook-go collector...'
 (cd collectors/facebook-go && "$go_bin" mod download && "$go_bin" build -mod=readonly -o ../../.bin/facebook-go .)

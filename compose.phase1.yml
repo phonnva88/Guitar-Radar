@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16-bookworm@sha256:5264710be20f409750ac6dc4e5706dcef929c87e241605463f0f9aefa932a8d9
+    environment:
+      POSTGRES_DB: guitar_radar
+      POSTGRES_USER: radar
+      POSTGRES_PASSWORD: ${RADAR_DB_PASSWORD:?Run bash scripts/phase1.sh setup first}
+    ports:
+      - "127.0.0.1:${RADAR_DB_PORT:-54329}:5432"
+    volumes:
+      - phase1-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radar -d guitar_radar"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  phase1-postgres:

@@ -1,10 +1,24 @@
-# Guitar Radar — Phase 0
+# Guitar Radar
+
+Phase 1 có ứng dụng web riêng tư với feed, tìm kiếm/lọc, quản lý group, thu thập bằng `facebook-go`, PostgreSQL, lịch tùy chọn và duyệt bài trùng thủ công. Hướng dẫn đầy đủ: [Chạy Phase 1](docs/phase1-running.md).
+
+Trong WSL Ubuntu, với Docker Desktop/Compose đã chạy:
+
+```bash
+cd /mnt/c/projects/Guitar-Radar
+bash scripts/phase1.sh setup
+bash scripts/phase1.sh start
+```
+
+Mở http://localhost:8000. Tài khoản riêng của ứng dụng nằm trong `.env.phase1` được tạo khi setup. Session Facebook vẫn cấu hình trong `.env` như POC. Mặc định thu thập thủ công ở tab Nhóm theo dõi; không có Facebook request trong setup.
+
+## Công cụ Phase 0 và Phase 0.5
 
 POC so sánh **teslashibe/facebook-go** và **bsho5/fbgql** trên **cùng một Facebook Group**, cùng session, giới hạn trang và thứ tự `CHRONOLOGICAL`. Chỉ thu thập post, normalize và tạo report; không frontend, database, AI hay dedup cross-post.
 
 ## Trạng thái kiểm chứng
 
-Hai adapter dùng API/parser thực của upstream đã pin, có thể build và chạy kiểm thử offline. **Chưa xác minh thu thập live**: môi trường ban đầu chưa có Facebook session, và proxy từ chối Facebook (`CONNECT 403`). Group yêu cầu: `https://www.facebook.com/groups/vegmpremium`.
+Hai adapter dùng API/parser thực của upstream đã pin. Benchmark Phase 0.5 do người dùng chạy trên `vegmpremium` đã báo `READY FOR PHASE 1` trong mẫu quan sát; facebook-go ổn định, fbgql có 1 lượt lỗi trên 10 lượt. Cloud không có session Facebook để chạy lại collection live. Lưu ý: kết quả benchmark không bảo đảm coverage hay độ tin cậy production.
 
 `make demo` tạo dữ liệu **synthetic**, không gọi Facebook và không phải benchmark. Không dùng các số liệu này để chọn collector. Report live khi thiếu session ghi `failed`, `authentication_failed`, không phải 0 bài thành công.
 
@@ -172,7 +186,7 @@ reports/demo/             # Report synthetic
 
 Report có counts/duration/errors, matched/one-sided references, completeness, warnings và kết luận thận trọng. Raw lỗi vẫn có `posts: []`, `status: failed`, error code/context an toàn. Code chính: `authentication_failed`, `session_expired`, `checkpoint_required`, `rate_limited`, `group_not_accessible`, `group_not_found`, `network_error`, `parse_error`, `unknown_error`; có thêm lỗi cấu hình/dependency.
 
-## Checklist benchmark live — chưa chạy
+## Checklist cho benchmark bổ sung
 
 | Kịch bản | Thực hiện | Cần xác minh |
 |---|---|---|
@@ -192,6 +206,4 @@ Không khẳng định `vegmpremium` public hay account đã join khi chưa xác
 - Parser upstream có thể âm thầm bỏ feed edge không nhận dạng được. Wrapper cô lập lỗi nó nhìn thấy, không thể đếm mọi silent omission nếu không sửa upstream; `errors: 0` không đảm bảo không bỏ sót.
 - Feed live thay đổi giữa hai collector tuần tự; số trang bằng nhau chưa chắc cùng khoảng thời gian/số post. Chỉ báo khác biệt trong mẫu quan sát, không tự chọn collector tốt nhất.
 
-Phase 0 dừng tại đây, không bắt đầu Phase 1.
-
-Bản đề xuất phạm vi Phase 1 (chưa triển khai): [docs/phase1-scope.md](docs/phase1-scope.md).
+Các lệnh POC phía trên chỉ tạo dữ liệu/report. Ứng dụng Phase 1 dùng lệnh riêng ở đầu README; xem [phạm vi Phase 1](docs/phase1-scope.md).

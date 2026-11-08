@@ -49,3 +49,11 @@ validation-demo:
 	$(PYTHON) -m validation demo
 validation-analyze:
 	$(PYTHON) -m validation analyze
+
+.PHONY: phase1-setup phase1 phase1-backup
+phase1-setup:
+	bash scripts/phase1.sh setup
+phase1:
+	bash scripts/phase1.sh start
+phase1-backup:
+	bash scripts/phase1.sh backup

@@ -16,6 +16,10 @@ Demo là synthetic, kết quả riêng ở `reports/validation-demo/`, luôn NOT
 
 Giữ `.env` đã có cookie; đừng copy `.env.example` đè lên. Nếu shell đang export cookie cũ, `unset FACEBOOK_COOKIE FACEBOOK_COOKIE_FILE FACEBOOK_USER_ID` để dùng file `.env`. Không gửi cookie trong chat/commit.
 
+Nếu lệnh dừng với `session_expired`, Facebook đang trả về trang đăng nhập ngay trong bước kiểm tra link hoặc group. Đăng nhập Facebook bằng trình duyệt, xác nhận tài khoản mở được group, rồi cập nhật `FACEBOOK_COOKIE` trong `.env` (hoặc file được chỉ định bởi `FACEBOOK_COOKIE_FILE`) bằng Cookie header của request mới tới Facebook. Setup thành công không xác nhận cookie còn hiệu lực. Sau khi cập nhật, chạy lại lệnh validation; suite dừng sau lỗi phiên nên `--runs 10` có thể chỉ tạo một run lỗi.
+
+Nhận diện trang đăng nhập dựa trên HTTP 401, redirect tới login hoặc phần tử form đăng nhập thật. Tên module JavaScript như `CometLoginForm` có thể xuất hiện cả khi đã đăng nhập và không phải bằng chứng cookie hết hạn.
+
 Khung yêu cầu đã xác nhận: **06/11/2026 00:00 Việt Nam → lúc bắt đầu suite**. Chạy một cặp:
 
 ```bash
@@ -44,7 +48,9 @@ Mỗi collector mặc định tối đa 50 page, 20 post/page, 300 giây; có th
 | `1JMZMYrcML` | Không |
 | `1DpPjtnm6T` | Không |
 
-Link share không chứa post ID. Runner resolve bằng cùng session, chỉ nhận canonical/og:url hoặc redirect về permalink rõ ràng. Nhiều ID/không có ID => unresolved, không đoán từ caption hay ID profile. Xem `reports/known-posts-resolved.json`; có thể thay URL bằng numeric `post_id` sau khi xác nhận. Các link cần thuộc khoảng benchmark và xuất hiện trong feed; nếu ngoài khoảng, chúng sẽ là not_observed, không phải extraction_failure.
+Link share không chứa post ID. Runner resolve bằng cùng session, chỉ nhận canonical/og:url hoặc redirect về permalink rõ ràng. Nhiều ID/không có ID => unresolved, không đoán từ caption hay ID profile. Xem `reports/known-posts-resolved.json`. Mỗi fixture chỉ được xác nhận cùng group khi canonical/permalink có numeric `/groups/<id>/posts/...` hoặc `/groups/<id>/permalink/...` trùng ID group của run; post ID riêng lẻ, share alias chưa resolve và group alias không numeric đều là group-unverified. Numeric group khác được báo wrong-group và không tính vào recall.
+
+Nếu có thời gian bài đăng được xác nhận độc lập, có thể thêm `"verified_posted_at": "2026-11-07T11:00:00Z"` vào fixture. Timestamp ngoài FROM/TO được báo outside-window-verified; timestamp trong window mà không thấy được báo not-observed; fixture cùng group không thấy và không có timestamp được báo timestamp-unknown. Các trạng thái sai group/chưa xác minh/ngoài window/không rõ thời gian đều tách khỏi image recall. Nếu không còn fixture ảnh đã xác nhận cùng group và trong window, recall là null và readiness bị chặn. Không bỏ fixture để nâng recall.
 
 ```json
 [
@@ -53,9 +59,9 @@ Link share không chứa post ID. Runner resolve bằng cùng session, chỉ nh�
 ]
 ```
 
-Đây là placeholder format, không dùng nguyên các ID chữ đó làm fixture thật. `--known-posts path.json` chọn file khác; `KNOWN_IMAGE_POSTS` trong env/.env nhận CSV ID hoặc URL có ảnh. Ground truth không được tự suy từ extractor đang được đánh giá.
+Đây là placeholder format, không dùng nguyên các ID chữ đó làm fixture thật. `--known-posts path.json` chọn file khác; `KNOWN_IMAGE_POSTS` trong env/.env nhận CSV ID hoặc URL có ảnh. ID riêng lẻ có thể tìm bài trong sample nhưng không xác nhận group. Ground truth không được tự suy từ extractor đang được đánh giá.
 
-Report tách rõ known image không xuất hiện, known image đã thấy nhưng images rỗng (extraction_failure), known text-only không ảnh (expected), và text-only bị gắn ảnh (possible false positive). `image_detection_recall` là detected/all known image posts; conditional recall là detected/observed known image posts; `observation_recall` là observed/all known image posts. Không có ground truth => recall null. “Có ít nhất một ảnh” chưa xác minh lấy đủ cả album.
+Report tách rõ fixture wrong-group, group-unverified, ngoài window đã xác nhận, timestamp chưa biết, không quan sát thấy, đã quan sát nhưng không có ảnh (extraction_failure), text-only đúng và text-only bị gắn ảnh (possible false positive). `image_detection_recall` dùng fixture ảnh đã xác nhận đúng group/window; conditional recall là detected/observed trong tập đó; `observation_recall` là observed/tổng fixture ảnh eligible. Không có ground truth eligible => recall null. “Có ít nhất một ảnh” chưa xác minh lấy đủ cả album.
 
 ## Media investigation
 
@@ -67,6 +73,8 @@ Hai giới hạn tìm được bằng đọc source upstream đã pin:
 Phase 0.5 bọc transport Go để đọc raw GraphQL **trước** model; Python scope story vào group feed edge, giữ duplicate trong raw và dùng parser upstream cho field post. Cả hai thêm `image_candidates` có URL, width/height nếu có, source/path và `possible_type`/`type_evidence`. Normalized `images` vẫn là URL array để giữ compatibility; chi tiết ở `post.validation.image_candidates`.
 
 Extractor dựa vào kiểu Photo/Image và vị trí attachment/media, hỗ trợ nested/carousel/comet sections, không gom mọi URL trong response. Loại avatar/profile, link preview, thumbnail video/reel, recommendation và ảnh của shared original; chưa có bằng chứng loại post thì để unknown. Phần ảnh đã được kiểm thử trên response giả lập có cấu trúc GraphQL, **chưa khẳng định hoạt động/đủ ảnh trên các 5 link live**.
+
+Handoff của 10 paired runs ghi nhận `fbgql` author presence 0% và không có bài chỉ xuất hiện ở fbgql. Vì vậy report mô tả fbgql hiện là comparison/audit signal trong mẫu đó; không thêm author suy đoán từ group/page hay shared original. Chỉ đánh giá lại nếu raw story hiện tại cung cấp author có liên hệ rõ với chính bài.
 
 ## Time window và output
 
@@ -98,7 +106,7 @@ Report hiện hành được cất vào `reports/history/validation-.../` trư�
 .venv/bin/python -m validation analyze --run-ids 'RUN_ID_1,RUN_ID_2,RUN_ID_3' --known-posts fixtures/known-image-posts.json
 ```
 
-Phải chọn cùng group và cùng frozen window; analyze từ chối trộn window/group/run-ID trùng. Mặc định analyze dùng known-post resolutions đã lưu trong metadata của run, không resolve mạng. Nếu muốn override rõ ràng, truyền `--known-posts reports/known-posts-resolved.json` hoặc file đã xác nhận khác; share link mới chưa resolve vẫn phải báo chưa quan sát.
+Phải chọn cùng group và cùng frozen window; analyze từ chối trộn window/group/run-ID trùng. Mặc định analyze dùng known-post resolutions đã lưu trong metadata của run, không resolve mạng. Nếu muốn override rõ ràng, truyền `--known-posts reports/known-posts-resolved.json` hoặc file đã xác nhận khác; share link chưa resolve và fixture không có numeric group ID sẽ được báo unverified.
 
 ## Quyết định
 
@@ -106,4 +114,4 @@ Mỗi run có status/duration/pages/raw rows/sample rows/unique/identifiable/dup
 
 Ranking theo success rate → observed union coverage → URL → author → timestamp → known image recall → latency. Coverage là union hai collector quan sát, không phải tổng post thật của group; tie không chọn bừa. READY yêu cầu ít nhất 3 complete paired live runs, mọi required field/identity, confirmed images đã thấy và detect, consistency không còn vấn đề và không còn collector-only omission chưa giải thích. Đây là ngưỡng tối thiểu thận trọng, không phải cam kết production. `primary_candidate` có thể có trong khi `primary` vẫn null/NOT READY.
 
-`final-report.md` trả lời A–F với evidence/blockers. Không chuyển sang Phase 1 tự động. Cloud hiện chưa có cookie/raw benchmark người dùng nên phần live phải chạy trên WSL của bạn trước khi kết luận.
+`final-report.md` trả lời A–F với evidence/blockers. Không chuyển sang Phase 1 tự động. Handoff 08/11/2026 ghi nhận 10 paired live runs thành công ở group `5651370361550003`, nhưng năm fixture ảnh/text canonical resolve về group `1463136805074844`; vì thế số liệu đó không chứng minh image recall. Gói handoff có aggregate evidence, không có raw/normalized run files để tái tạo offline report trong checkout Cloud. Bản sửa dưới đây sẽ báo mismatch rõ ràng; cần fixture cùng group/window đã xác nhận trước khi kết luận media readiness.

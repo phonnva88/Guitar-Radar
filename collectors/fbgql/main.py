@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from http.cookies import SimpleCookie, CookieError
 import json
 import math
@@ -139,6 +140,35 @@ def check_error_fields(obj: dict) -> None:
         raise CollectionError("unknown_error")
 
 
+class LoginFormParser(HTMLParser):
+    """Inspect actual form elements, not login module names in bootstrap scripts."""
+
+    def __init__(self):
+        super().__init__()
+        self.found = False
+        self.form_fields = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = {key: (value or "").lower() for key, value in attrs}
+        if tag == "form":
+            self.form_fields = set()
+            if (attrs.get("id") in {"login", "login_form", "loginform"}
+                    or attrs.get("name") in {"login", "login_form", "loginform"}
+                    or re.search(r"/login(?:[/.]|$)", attrs.get("action", ""))):
+                self.found = True
+        elif tag == "input" and self.form_fields is not None:
+            if attrs.get("name") == "email":
+                self.form_fields.add("email")
+            if attrs.get("name") == "pass" or attrs.get("type") == "password":
+                self.form_fields.add("password")
+            if self.form_fields == {"email", "password"}:
+                self.found = True
+
+    def handle_endtag(self, tag):
+        if tag == "form":
+            self.form_fields = None
+
+
 class SafeTransport:
     """fbgql Transport interface, inherited proxy/CA trust, no automatic retries."""
     def __init__(self, timeout: float):
@@ -219,7 +249,9 @@ class SafeTransport:
                             raise CollectionError("checkpoint_required")
                         if re.search(r"action=[\"'][^\"']*/account/(?:disabled|restricted)", low):
                             raise CollectionError("rate_limited")
-                        if any(marker in low for marker in ('name="email"', "login_form", "loginform", 'name="login"')):
+                        login = LoginFormParser()
+                        login.feed(body)
+                        if login.found:
                             raise CollectionError("session_expired")
                         if method == "POST" and status == 200:
                             raise CollectionError("parse_error")

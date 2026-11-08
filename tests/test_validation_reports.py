@@ -10,8 +10,8 @@ from validation.reports import build_stability, write_reports
 
 START = "2026-11-07T10:00:00Z"
 END = "2026-11-07T12:00:00Z"
-KNOWN = [{"post_id": "1001", "expected_has_images": True},
-         {"post_id": "1002", "expected_has_images": False}]
+KNOWN = [{"post_id": "1001", "url": "https://www.facebook.com/groups/987/posts/1001/", "expected_has_images": True},
+         {"post_id": "1002", "url": "https://www.facebook.com/groups/987/posts/1002/", "expected_has_images": False}]
 
 
 def post(pid="1001", collector="facebook-go", **changes):
@@ -60,6 +60,8 @@ class ValidationReportTests(unittest.TestCase):
         self.assertEqual(result["recommendation"]["fallback"], "fbgql")
         self.assertEqual(result["recommendation"]["phase1_status"], "READY FOR PHASE 1")
         self.assertEqual(set(result["answers"]), set("ABCDEF"))
+        self.assertIn("author data was absent", result["answers"]["D"]["answer"])
+        self.assertEqual(result["answers"]["D"]["evidence"]["additional_posts_in_sample"], 0)
         self.assertEqual(result["facebook_go"]["per_run"][0]["rows_collected"], 3)
         self.assertEqual(result["facebook_go"]["per_run"][0]["in_window_posts"], 2)
 
@@ -94,7 +96,8 @@ class ValidationReportTests(unittest.TestCase):
         runs = suite()
         for item in runs:
             item["collectors"]["facebook-go"]["posts"][0]["images"] = []
-        result = build_stability(runs, KNOWN + [{"post_id": "1003", "expected_has_images": True}])
+        result = build_stability(runs, KNOWN + [{"post_id": "1003", "url": "https://www.facebook.com/groups/987/posts/1003/",
+                                                 "verified_posted_at": "2026-11-07T11:00:00Z", "expected_has_images": True}])
         observed = result["facebook_go"]["per_run"][0]["image_validation"]
         self.assertEqual(observed["extraction_failures"], ["1001"])
         self.assertEqual(observed["missing_known_image_posts"], ["1003"])
@@ -114,9 +117,39 @@ class ValidationReportTests(unittest.TestCase):
         result = build_stability(suite(), known)
         image = result["facebook_go"]["per_run"][0]["image_validation"]
         self.assertEqual(image["known_image_posts"], 1)
-        self.assertEqual(image["missing_known_image_posts"], ["https://www.facebook.com/share/p/OpaqueExample/"])
+        self.assertEqual(image["unresolved_posts"], ["https://www.facebook.com/share/p/OpaqueExample/"])
+        self.assertEqual(image["missing_known_image_posts"], [])
+        self.assertIsNone(image["image_detection_recall"])
         self.assertNotIn("DO_NOT_SAVE", json.dumps(result))
         self.assertIsNone(result["recommendation"]["primary"])
+
+    def test_fixture_scope_does_not_count_wrong_group_or_post_id_only(self):
+        known = [
+            {"post_id": "1001", "url": "https://www.facebook.com/groups/555/posts/1001/", "expected_has_images": True},
+            {"post_id": "1002", "expected_has_images": True},
+        ]
+        result = build_stability(suite(), known)
+        image = result["facebook_go"]["images"]
+        self.assertIsNone(image["image_detection_recall"])
+        self.assertEqual(image["expected_image_observations"], 0)
+        self.assertEqual(image["wrong_group_observations"], 3)
+        self.assertEqual(image["group_unverified_observations"], 3)
+        self.assertEqual(image["extraction_failures"], 0)
+        self.assertTrue(any("different numeric group" in text for text in result["health"]["facebook_go"]["blockers"]))
+        self.assertEqual(result["recommendation"]["phase1_status"], "NOT READY FOR PHASE 1")
+
+    def test_window_scope_categories_and_zero_eligible_recall(self):
+        known = [
+            {"post_id": "1001", "url": "https://www.facebook.com/groups/987/posts/1001/", "verified_posted_at": "2026-11-07T09:00:00Z", "expected_has_images": True},
+            {"post_id": "9999", "url": "https://www.facebook.com/groups/987/posts/9999/", "expected_has_images": True},
+        ]
+        result = build_stability(suite(), known)
+        image = result["facebook_go"]["per_run"][0]["image_validation"]
+        self.assertEqual(image["fixture_scope_counts"]["outside_window_verified"], 1)
+        self.assertEqual(image["fixture_scope_counts"]["timestamp_unknown"], 1)
+        self.assertEqual(image["fixture_scope_counts"]["not_observed"], 0)
+        self.assertEqual(image["eligible_known_image_posts"], 0)
+        self.assertIsNone(result["facebook_go"]["images"]["image_detection_recall"])
 
     def test_text_only_post_images_are_a_false_positive_to_review(self):
         runs = suite()

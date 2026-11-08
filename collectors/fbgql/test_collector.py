@@ -205,6 +205,8 @@ class CollectorTests(unittest.TestCase):
 
     def test_transport_detects_login_and_checkpoint_on_http_200(self):
         for html, expected in [('<form name="login"><input name="email"></form>', "session_expired"),
+                               ("<FORM ACTION='/login/device-based/regular/login/'>", "session_expired"),
+                               ('<form><input name="email"><input type="password" name="pass"></form>', "session_expired"),
                                ('<form action="/checkpoint/"></form>', "checkpoint_required")]:
             transport = collector.SafeTransport(2)
             try:
@@ -214,6 +216,21 @@ class CollectorTests(unittest.TestCase):
                     self.assertEqual(raised.exception.code, expected)
             finally:
                 transport.close()
+
+    def test_transport_does_not_treat_login_javascript_or_unrelated_fields_as_logout(self):
+        pages = [
+            '<html><script>requireLazy(["CometLoginForm", "login_form"], function () {});</script></html>',
+            '<html><!-- <form id="login_form"> --><a href="/login/">Log in</a></html>',
+            '<html><form id="contact"><input name="email"></form><form><input type="password"></form></html>',
+        ]
+        for html in pages:
+            with self.subTest(html=html):
+                transport = collector.SafeTransport(2)
+                try:
+                    with patch.object(transport.session, "request", return_value=FakeResponse(200, html)):
+                        self.assertEqual(transport.get("https://www.facebook.com/", {}), html)
+                finally:
+                    transport.close()
 
 
     def test_alias_resolution_uses_explicit_group_markers(self):

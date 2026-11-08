@@ -14,6 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from compare import field_presence, match_posts, safe_md, validate_normalized, write_markdown
 from normalizer import FACEBOOK_HOSTS, canonical_permalink, identity, timestamp, web_url, write_json
+from validation.ground_truth import assess_fixture
 
 COLLECTORS = ("facebook-go", "fbgql")
 NAMES = {"facebook-go": "facebook_go", "fbgql": "fbgql"}
@@ -115,16 +116,24 @@ def _known_posts(known_posts):
         unresolved_share = bool(safe_url and post.get("unresolved") is True and urlsplit(safe_url).path.startswith("/share/p/"))
         if not pid and not url and not unresolved_share:
             raise ValueError("Known posts require a post ID or Facebook permalink")
+        url_pid = url.removeprefix("post:") if url else None
+        if pid and url_pid and pid != url_pid:
+            raise ValueError("Known-post ID does not match its canonical URL")
+        verified_at = timestamp(post.get("verified_posted_at"))
+        if "verified_posted_at" in post and (not isinstance(post.get("verified_posted_at"), str) or not verified_at):
+            raise ValueError("verified_posted_at must be a timezone-aware ISO 8601 timestamp")
         key = "id:" + pid if pid else "url:" + (url or safe_url)
         expected = post["expected_has_images"]
         if key in seen:
-            if seen[key] != expected:
+            if seen[key][0] != expected:
                 raise ValueError("Conflicting image ground truth")
+            if seen[key][1:] != (safe_url, verified_at):
+                raise ValueError("Conflicting known-post URLs or verified timestamps")
             continue
-        seen[key] = expected
+        seen[key] = (expected, safe_url, verified_at)
         result.append({"post_id": pid, "url": safe_url, "key": key, "unresolved": unresolved_share and not pid,
                        "canonical": url or ("post:" + pid if pid and pid.isdigit() else None),
-                       "expected_has_images": expected})
+                       "verified_posted_at": verified_at, "expected_has_images": expected})
     return result
 
 
@@ -136,39 +145,66 @@ def _known_matches(expected, post):
     return bool(expected["canonical"] and expected["canonical"] == url)
 
 
-def _images(known, indexed):
+def _images(known, indexed, group_id, bounds):
     image_posts = [post for post in known if post["expected_has_images"]]
-    missing, failures, unexpected, ambiguous = [], [], [], []
-    observed = detected = text_only_observed = 0
+    records, text_only_observed = [], 0
     for expected in known:
         matches = [post for post in indexed["posts"].values() if _known_matches(expected, post)]
-        label = expected["post_id"] or expected["url"]
-        if len(matches) != 1:
-            if len(matches) > 1:
-                ambiguous.append(label)
-            if expected["expected_has_images"]:
-                missing.append(label)
-            continue
-        has_images = bool(matches[0]["images"])
-        if expected["expected_has_images"]:
-            observed += 1
-            detected += int(has_images)
-            if not has_images:
-                failures.append(label)
+        ambiguous_matches = [item["post"] for item in indexed["ambiguous"]
+                             if _known_matches(expected, item.get("post", {}))]
+        has_observation = bool(matches or ambiguous_matches)
+        scope = assess_fixture(expected, group_id, bounds, observed=has_observation)
+        if scope["group_status"] == "wrong_group":
+            status = "wrong_group"
+        elif scope["group_status"] == "group_unverified":
+            status = "group_unverified"
+        elif scope["window_status"] == "outside_window_verified":
+            status = "outside_window_verified"
+        elif scope["window_status"] == "timestamp_unknown":
+            status = "timestamp_unknown"
+        elif ambiguous_matches or len(matches) > 1:
+            status = "ambiguous_duplicates"
+        elif not matches:
+            status = "not_observed"
+        elif expected["expected_has_images"]:
+            status = "detected" if matches[0]["images"] else "extraction_failure"
         else:
+            status = "unexpected_images" if matches[0]["images"] else "expected_text_only"
+        if status in {"expected_text_only", "unexpected_images"}:
             text_only_observed += 1
-            if has_images:
-                unexpected.append(label)
+        records.append({**expected, **scope, "observed": has_observation, "status": status,
+                        "image_count": len(matches[0]["images"]) if len(matches) == 1 else None})
+
+    eligible_images = [r for r in records if r["expected_has_images"] and r["eligible_for_window"]]
+    observed = sum(r["observed"] for r in eligible_images)
+    detected = sum(r["status"] == "detected" for r in eligible_images)
+    scope_statuses = ("wrong_group", "group_unverified", "outside_window_verified", "timestamp_unknown",
+                      "not_observed", "detected", "extraction_failure", "expected_text_only",
+                      "unexpected_images", "ambiguous_duplicates")
+    scope_counts = {status: sum(r["status"] == status for r in records) for status in scope_statuses}
+    failures = [r["post_id"] or r["url"] for r in records if r["eligible_for_window"] and r["status"] == "extraction_failure"]
+    missing = [r["post_id"] or r["url"] for r in records if r["eligible_for_window"] and r["expected_has_images"] and r["status"] == "not_observed"]
+    unexpected = [r["post_id"] or r["url"] for r in records if r["eligible_for_window"] and r["status"] == "unexpected_images"]
+    ambiguous = [r["post_id"] or r["url"] for r in records if r["eligible_for_window"] and r["status"] == "ambiguous_duplicates"]
+    text_total = sum(not post["expected_has_images"] for post in known)
+    eligible_text = sum(not r["expected_has_images"] and r["eligible_for_window"] for r in records)
     return {"ground_truth_supplied": bool(image_posts), "known_image_posts": len(image_posts),
+            "eligible_known_image_posts": len(eligible_images),
             "observed_known_image_posts": observed, "detected_image_posts": detected,
             "missing_known_image_posts": missing, "extraction_failures": failures,
-            "expected_text_only_posts": len(known) - len(image_posts),
+            "expected_text_only_posts": text_total, "eligible_text_only_posts": eligible_text,
             "observed_text_only_posts": text_only_observed, "unexpected_image_posts": unexpected,
-            "ambiguous_known_posts": ambiguous,
-            "image_detection_recall": detected / len(image_posts) if image_posts else None,
+            "ambiguous_known_posts": ambiguous, "fixture_scope_counts": scope_counts,
+            "wrong_group_posts": [r["post_id"] or r["url"] for r in records if r["status"] == "wrong_group"],
+            "unverified_group_posts": [r["post_id"] or r["url"] for r in records if r["status"] == "group_unverified"],
+            "unresolved_posts": [r["post_id"] or r["url"] for r in records if r["group_reason"] == "share_alias_unresolved"],
+            "outside_window_verified_posts": [r["post_id"] or r["url"] for r in records if r["status"] == "outside_window_verified"],
+            "timestamp_unknown_posts": [r["post_id"] or r["url"] for r in records if r["status"] == "timestamp_unknown"],
+            "observed_without_images": failures, "records": records,
+            "image_detection_recall": detected / len(eligible_images) if eligible_images else None,
             "conditional_image_detection_recall": detected / observed if observed else None,
-            "observation_recall": observed / len(image_posts) if image_posts else None,
-            "note": "Missing known posts are collection omissions, not established extraction failures; detection is not gallery completeness."}
+            "observation_recall": observed / len(eligible_images) if eligible_images else None,
+            "note": "Wrong-group, group-unverified, outside-window and unknown-time fixtures are excluded from recall and reported separately; missing eligible posts are collection omissions, not established extraction failures."}
 
 
 def _per_run(envelope, indexed, known):
@@ -190,7 +226,8 @@ def _per_run(envelope, indexed, known):
             "window_complete": complete, "window": window,
             "field_presence": field_presence(posts), "field_presence_denominator": len(posts),
             "post_id_presence": sum(bool(identity(post.get("post_id"))) for post in posts) / len(posts) if posts else None,
-            "image_validation": _images(known, indexed), "library_commit": envelope.get("library_commit")}
+            "image_validation": _images(known, indexed, envelope.get("group_id"), window),
+            "library_commit": envelope.get("library_commit")}
 
 
 def _consistency(observations, indexes, run_ids, source):
@@ -232,7 +269,7 @@ def _aggregate(observations, indexes, source, coverage):
     durations = [item["duration_ms"] for item in successful if source == "live"]
     weighted_posts = [post for index in indexes for post in index["posts"].values()]
     images = [item["image_validation"] for item in observations]
-    expected = sum(item["known_image_posts"] for item in images)
+    expected = sum(item["eligible_known_image_posts"] for item in images)
     observed = sum(item["observed_known_image_posts"] for item in images)
     detected = sum(item["detected_image_posts"] for item in images)
     return {"runs": len(observations), "success_runs": len(successful),
@@ -249,14 +286,24 @@ def _aggregate(observations, indexes, source, coverage):
             "ambiguous_posts": sum(item["ambiguous_posts"] for item in observations),
             "unidentifiable_posts": sum(item["unidentifiable_posts"] for item in observations),
             "errors": sum(item["errors"] for item in observations),
-            "images": {"expected_image_observations": expected, "observed_image_observations": observed,
+            "images": {"expected_image_observations": expected,
+                       "supplied_expected_image_observations": sum(item["known_image_posts"] for item in images),
+                       "eligible_known_image_posts": expected,
+                       "observed_image_observations": observed,
                        "detected_image_observations": detected,
                        "image_detection_recall": detected / expected if expected else None,
                        "conditional_image_detection_recall": detected / observed if observed else None,
                        "observation_recall": observed / expected if expected else None,
                        "extraction_failures": sum(len(item["extraction_failures"]) for item in images),
                        "missing_known_image_observations": sum(len(item["missing_known_image_posts"]) for item in images),
-                       "unexpected_image_observations": sum(len(item["unexpected_image_posts"]) for item in images)},
+                       "unexpected_image_observations": sum(len(item["unexpected_image_posts"]) for item in images),
+                       "eligible_text_only_observations": sum(item["eligible_text_only_posts"] for item in images),
+                       "fixture_scope_counts": {key: sum(item["fixture_scope_counts"][key] for item in images)
+                                                for key in images[0]["fixture_scope_counts"]} if images else {},
+                       "wrong_group_observations": sum(item["fixture_scope_counts"]["wrong_group"] for item in images),
+                       "group_unverified_observations": sum(item["fixture_scope_counts"]["group_unverified"] for item in images),
+                       "outside_window_verified_observations": sum(item["fixture_scope_counts"]["outside_window_verified"] for item in images),
+                       "timestamp_unknown_observations": sum(item["fixture_scope_counts"]["timestamp_unknown"] for item in images)},
             "per_run": observations}
 
 
@@ -300,7 +347,7 @@ def _omissions(runs, paired_ok, only_samples):
     return result
 
 
-def _ready_reasons(collector, metrics, consistency, source, group, paired_count, known, omissions):
+def _ready_reasons(collector, metrics, consistency, source, group, paired_count, omissions):
     reasons = []
     if source != "live":
         reasons.append("Live evidence is required; synthetic/unknown data cannot establish readiness.")
@@ -324,10 +371,19 @@ def _ready_reasons(collector, metrics, consistency, source, group, paired_count,
         reasons.append("Missing or ambiguous post identities need investigation.")
     if metrics["post_id_presence"] != 1.0:
         reasons.append("Explicit post IDs are missing on some observations, or no usable observations exist.")
-    if not any(item["expected_has_images"] for item in known):
-        reasons.append("No user-confirmed known-image posts were supplied; media extraction is unverified.")
+    if metrics["images"]["expected_image_observations"] == 0:
+        reasons.append("No user-confirmed known-image posts were verified in the target group and fixed time window; media extraction is unverified.")
     elif metrics["images"]["image_detection_recall"] != 1.0:
         reasons.append("Some known-image posts are missing or have no extracted images.")
+    scope = metrics["images"]["fixture_scope_counts"]
+    if scope.get("wrong_group", 0):
+        reasons.append("Some supplied fixtures resolve to a different numeric group ID.")
+    if scope.get("group_unverified", 0):
+        reasons.append("Some supplied fixtures have no verified numeric group ID, including unresolved aliases or post-ID-only entries.")
+    if scope.get("timestamp_unknown", 0):
+        reasons.append("Some same-group fixtures have unknown timestamps and cannot be assigned to the fixed window.")
+    if metrics["images"]["supplied_expected_image_observations"] and metrics["images"]["eligible_text_only_observations"] == 0:
+        reasons.append("No supplied text-only fixture was verified in the target group and fixed time window.")
     if metrics["images"]["unexpected_image_observations"]:
         reasons.append("Images were detected on known text-only posts; possible false positives require review.")
     if consistency["status"] != "stable_in_observed_window":
@@ -403,7 +459,7 @@ def build_stability(runs: list[dict], known_posts: list[dict]) -> dict:
     health = {}
     for collector in COLLECTORS:
         name = NAMES[collector]
-        reasons = _ready_reasons(collector, metrics[name], consistency[name], source, group, sum(paired_ok), known, omissions[name])
+        reasons = _ready_reasons(collector, metrics[name], consistency[name], source, group, sum(paired_ok), omissions[name])
         health[name] = {"collector": collector, "status": "READY FOR PHASE 1" if not reasons else "NOT READY FOR PHASE 1", "blockers": reasons}
 
     def score(collector):
@@ -432,13 +488,21 @@ def build_stability(runs: list[dict], known_posts: list[dict]) -> dict:
                       "reason": "A collector met all observed-sample readiness gates." if primary else "The available evidence does not satisfy every Phase 0.5 exit criterion."}
     go = metrics["facebook_go"]
     go_missing = omissions["facebook_go"]
+    fbgql_only_total = sum(item["only_fbgql"] for item in matching)
+    if fbgql_only_total == 0 and metrics["fbgql"]["field_presence"]["author"] == 0:
+        fbgql_role = "No additional posts were observed in this sample; author data was absent from all fbgql observations, so its current value is limited to a comparison/audit signal."
+    elif fbgql_only_total == 0:
+        fbgql_role = "No additional posts were observed in this sample; its current value is a comparison/audit signal."
+    else:
+        fbgql_role = "Some posts appeared only in fbgql; review their saved evidence before assigning fallback value."
     answers = {
         "A": {"question": "Does facebook-go have enough data for Guitar Radar?", "answer": health["facebook_go"]["status"], "evidence": health["facebook_go"]["blockers"]},
-        "B": {"question": "Does image extraction work?", "answer": "Verified on all supplied known-image observations" if go["images"]["image_detection_recall"] == 1.0 and source == "live" else "Not fully verified on live known-image posts",
+        "B": {"question": "Does image extraction work?", "answer": "Verified on all eligible, user-confirmed known-image observations" if go["images"]["expected_image_observations"] > 0 and go["images"]["image_detection_recall"] == 1.0 and source == "live" else "Not fully verified on live known-image posts",
               "evidence": {"facebook_go": go["images"], "fbgql": metrics["fbgql"]["images"]}},
         "C": {"question": "Is facebook-go stable across repeated runs?", "answer": consistency["facebook_go"]["status"], "evidence": {"runs": go["runs"], "success_rate": go["success_rate"], "complete_window_runs": go["complete_window_runs"]}},
-        "D": {"question": "What value does fbgql provide as fallback?", "answer": "Potential independent audit; any additional coverage must be evidenced by controlled live runs. Suitability depends on success/field/media metrics; no automatic fallback on a security challenge.",
-              "evidence": {"success_rate": metrics["fbgql"]["success_rate"], "only_fbgql_per_run": [item["only_fbgql"] for item in matching], "field_presence": metrics["fbgql"]["field_presence"]}},
+        "D": {"question": "What value does fbgql provide as fallback?", "answer": fbgql_role,
+              "evidence": {"success_rate": metrics["fbgql"]["success_rate"], "only_fbgql_per_run": [item["only_fbgql"] for item in matching],
+                           "additional_posts_in_sample": fbgql_only_total, "field_presence": metrics["fbgql"]["field_presence"]}},
         "E": {"question": "Does facebook-go systematically miss a post type?", "answer": "Repeated collector-only evidence requires investigation" if go_missing["repeated_missing_identities"] else "No systematic omission established by this sample; absence of evidence is not proof of complete coverage",
               "evidence": {"post_type_counts": go_missing["post_type_counts"], "repeated_missing_identities": go_missing["repeated_missing_identities"]}},
         "F": {"question": "Are there blockers before Phase 1?", "answer": recommendation["phase1_status"], "evidence": recommendation["blockers"]},
@@ -451,8 +515,8 @@ def build_stability(runs: list[dict], known_posts: list[dict]) -> dict:
             "collector_only": omissions, "health": health, "recommendation": recommendation, "answers": answers,
             "limitations": ["Coverage uses only the union observed in complete paired samples; Facebook ground truth is unavailable.",
                             "Field presence does not establish complete captions or complete image galleries.",
-                            "Image detection recall uses only user-supplied expected-image posts and includes missing fixture posts in its denominator.",
-                            "Conditional image recall excludes missing fixture posts; missing posts and extraction failures are reported separately.",
+            "Image detection recall uses only user-supplied image fixtures verified for this numeric group and fixed window; invalid-scope fixtures are reported separately.",
+            "Conditional image recall excludes eligible fixtures not observed; missing in-window posts and observed extraction failures are reported separately.",
                             "Duration summaries include only successful live runs, not failed startup or synthetic timings.",
                             "Unexpected set/field changes require review; Facebook can edit, delete or reorder posts.",
                             "At least three complete repetitions is a minimum POC gate, not a guarantee of production reliability."]}
@@ -480,6 +544,15 @@ def _stability_md(report):
                           ("Observed union coverage", [report[c]["avg_observed_union_coverage"] for c in ("facebook_go", "fbgql")]),
                           ("Known-image detection recall", [report[c]["images"]["image_detection_recall"] for c in ("facebook_go", "fbgql")])):
         lines.append(f"| {title} | {_percent(values[0])} | {_percent(values[1])} |")
+    lines += ["", "## Ground-truth fixture scope", "",
+              "Counts are fixture observations across runs. Invalid group/time fixtures do not enter image recall.", "",
+              "| Status | facebook-go | fbgql |", "|---|---:|---:|"]
+    for title, key in (("Wrong numeric group", "wrong_group_observations"),
+                       ("Group unverified or alias unresolved", "group_unverified_observations"),
+                       ("Outside window with verified time", "outside_window_verified_observations"),
+                       ("Timestamp unknown", "timestamp_unknown_observations"),
+                       ("Eligible known image posts observed without images", "extraction_failures")):
+        lines.append(f"| {title} | {report['facebook_go']['images'][key]} | {report['fbgql']['images'][key]} |")
     lines += ["", "## Field presence", "", "| Field | facebook-go | fbgql |", "|---|---:|---:|"]
     for field in ("text", "author", "url", "images", "posted_at"):
         lines.append(f"| {field} | {_percent(report['facebook_go']['field_presence'][field])} | {_percent(report['fbgql']['field_presence'][field])} |")
@@ -520,7 +593,8 @@ def _health_md(report):
         lines += ["## " + collector, "", "Status: " + health["status"], "",
                   "Success rate: " + _percent(metrics["success_rate"]), "",
                   "Observed union coverage: " + _percent(metrics["avg_observed_union_coverage"]), "",
-                  "Known-image detection recall: " + _percent(metrics["images"]["image_detection_recall"]), ""]
+                  "Known-image detection recall: " + _percent(metrics["images"]["image_detection_recall"]), "",
+                  "Fixture scope counts: " + safe_md(metrics["images"]["fixture_scope_counts"]), ""]
         lines += ["- " + item for item in health["blockers"]] or ["All declared POC evidence gates passed in this sample."]
         lines.append("")
     decision = report["recommendation"]

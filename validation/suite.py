@@ -15,12 +15,20 @@ from html.parser import HTMLParser
 from urllib.parse import urlsplit, urlunsplit
 
 from compare import build_report, markdown_report, write_markdown
-from normalizer import canonical_permalink, normalize_run, write_json
+from normalizer import canonical_permalink, normalize_run, timestamp, write_json
 from scripts import phase0
+from validation.ground_truth import assess_fixture
 
 ROOT = phase0.ROOT
 COLLECTORS = phase0.COLLECTORS
 STOP_CODES = {"checkpoint_required", "rate_limited", "session_expired", "authentication_failed", "account_restricted"}
+STOP_HINTS = {
+    "session_expired": "Facebook returned a logged-out session. Log in manually, confirm group access, then update FACEBOOK_COOKIE in .env or FACEBOOK_COOKIE_FILE. Exported values override .env; unset FACEBOOK_COOKIE FACEBOOK_COOKIE_FILE FACEBOOK_USER_ID to use .env.",
+    "authentication_failed": "Configure a valid FACEBOOK_COOKIE with c_user and xs locally in .env or FACEBOOK_COOKIE_FILE; FACEBOOK_USER_ID must match c_user. Exported values override .env. Never paste cookies into chat or logs.",
+    "checkpoint_required": "Complete the security checkpoint manually on Facebook before running validation again.",
+    "rate_limited": "Facebook throttled or restricted requests. Wait for the restriction to clear before running validation again.",
+    "account_restricted": "Resolve the account restriction manually on Facebook before running validation again.",
+}
 VERSIONS = {"facebook-go": "0c762f3eea9082ed7a4694d6c474c3622546b3b6", "fbgql": "28e03ae84012be44d37a67014fcfcfcc420c9ee9"}
 
 
@@ -75,19 +83,32 @@ def known_posts(path: Path | None, csv: str = "") -> list[dict]:
         if not isinstance(entry, dict) or type(entry.get("expected_has_images")) is not bool:
             raise ValueError("Each known post requires expected_has_images true or false")
         post_id, url = entry.get("post_id"), fixture_url(entry.get("url"))
+        url_key = canonical_permalink(url) if url else None
+        url_post_id = url_key.removeprefix("post:") if url_key else None
+        if post_id and url_post_id and str(post_id) != url_post_id:
+            raise ValueError("Known-post ID does not match its canonical URL")
         if not post_id and url:
-            key = canonical_permalink(url)
-            post_id = key.removeprefix("post:") if key else None
+            post_id = url_post_id
         if not post_id and url:
             label = url
         elif isinstance(post_id, str) and re.fullmatch(r"[A-Za-z0-9_]+", post_id):
             label = post_id
         else:
             raise ValueError("Known posts need a valid post ID or canonical Facebook post URL")
-        if label in result and result[label]["expected_has_images"] != entry["expected_has_images"]:
-            raise ValueError("Conflicting known-post expectations")
-        result[label] = {"post_id": post_id, "url": url, "unresolved": post_id is None,
-                         "expected_has_images": entry["expected_has_images"]}
+        if label in result:
+            existing = result[label]
+            if existing["expected_has_images"] != entry["expected_has_images"]:
+                raise ValueError("Conflicting known-post expectations")
+            if existing.get("url") != url or existing.get("verified_posted_at") != timestamp(entry.get("verified_posted_at")):
+                raise ValueError("Conflicting known-post URLs or verified timestamps")
+        verified_at = timestamp(entry.get("verified_posted_at"))
+        if "verified_posted_at" in entry and (not isinstance(entry.get("verified_posted_at"), str) or not verified_at):
+            raise ValueError("verified_posted_at must be a timezone-aware ISO 8601 timestamp")
+        record = {"post_id": post_id, "url": url, "unresolved": post_id is None,
+                  "expected_has_images": entry["expected_has_images"]}
+        if verified_at:
+            record["verified_posted_at"] = verified_at
+        result[label] = record
     return list(result.values())
 
 
@@ -166,11 +187,21 @@ def image_validation(run: dict, known: list[dict]) -> dict:
             index.setdefault(key.removeprefix("post:"), []).append(post)
     records = []
     for item in known:
-        observations = index.get(item["post_id"], []) if item.get("post_id") else []
+        key = item.get("post_id") or canonical_permalink(item.get("url"), run.get("group_id"))
+        observations = index.get(str(key).removeprefix("post:"), []) if key else []
         counts = [len(p["images"]) for p in observations]
         inconsistent = len(set(counts)) > 1
         detected = bool(counts) and all(count > 0 for count in counts)
-        if not observations:
+        scope = assess_fixture(item, run.get("group_id"), run.get("window"), observed=bool(observations))
+        if scope["group_status"] == "wrong_group":
+            status = "wrong_group"
+        elif scope["group_status"] == "group_unverified":
+            status = "group_unverified"
+        elif scope["window_status"] == "outside_window_verified":
+            status = "outside_window_verified"
+        elif scope["window_status"] == "timestamp_unknown":
+            status = "timestamp_unknown"
+        elif not observations:
             status = "not_observed"
         elif inconsistent:
             status = "ambiguous_duplicates"
@@ -178,24 +209,38 @@ def image_validation(run: dict, known: list[dict]) -> dict:
             status = "detected" if detected else "extraction_failure"
         else:
             status = "unexpected_images" if detected else "expected_text_only"
-        records.append({**item, "observed": bool(observations), "images_detected": detected,
+        records.append({**item, **scope, "observed": bool(observations), "images_detected": detected,
                         "status": status, "image_counts": counts,
                         "evidence": [p.get("validation", {}) for p in observations]})
     positive = [r for r in records if r["expected_has_images"]]
-    observed = [r for r in positive if r["observed"]]
-    detected = [r for r in positive if r["status"] == "detected"]
-    return {"ground_truth_supplied": bool(known), "known_image_posts": len(positive),
+    eligible_positive = [r for r in positive if r["eligible_for_window"]]
+    observed = [r for r in eligible_positive if r["observed"]]
+    detected = [r for r in eligible_positive if r["status"] == "detected"]
+    count = lambda status: sum(r["status"] == status for r in records)
+    return {"ground_truth_supplied": bool(positive), "known_image_posts": len(positive),
+            "eligible_known_image_posts": len(eligible_positive),
             "observed_known_image_posts": len(observed), "detected_image_posts": len(detected),
-            "missing_known_image_posts": [r["post_id"] or r.get("url") for r in positive if not r["observed"]],
-            "extraction_failures": [r["post_id"] for r in positive if r["status"] == "extraction_failure"],
-            "ambiguous_known_posts": [r["post_id"] for r in records if r["status"] == "ambiguous_duplicates"],
+            "missing_known_image_posts": [r.get("post_id") or r.get("url") for r in eligible_positive if r["status"] == "not_observed"],
+            "extraction_failures": [r.get("post_id") for r in eligible_positive if r["status"] == "extraction_failure"],
+            "ambiguous_known_posts": [r.get("post_id") for r in records if r["status"] == "ambiguous_duplicates"],
             "expected_text_only_posts": len(records) - len(positive),
-            "unexpected_image_posts": [r["post_id"] for r in records if r["status"] == "unexpected_images"],
-            "image_detection_recall": len(detected) / len(positive) if positive else None,
+            "eligible_text_only_posts": sum(not r["expected_has_images"] and r["eligible_for_window"] for r in records),
+            "unexpected_image_posts": [r.get("post_id") for r in records if r["status"] == "unexpected_images"],
+            "fixture_scope_counts": {status: count(status) for status in (
+                "wrong_group", "group_unverified", "outside_window_verified", "timestamp_unknown",
+                "not_observed", "detected", "extraction_failure", "expected_text_only", "unexpected_images",
+                "ambiguous_duplicates")},
+            "wrong_group_posts": [r.get("post_id") or r.get("url") for r in records if r["status"] == "wrong_group"],
+            "unverified_group_posts": [r.get("post_id") or r.get("url") for r in records if r["status"] == "group_unverified"],
+            "unresolved_posts": [r.get("post_id") or r.get("url") for r in records if r["group_reason"] == "share_alias_unresolved"],
+            "outside_window_verified_posts": [r.get("post_id") or r.get("url") for r in records if r["status"] == "outside_window_verified"],
+            "timestamp_unknown_posts": [r.get("post_id") or r.get("url") for r in records if r["status"] == "timestamp_unknown"],
+            "observed_without_images": [r.get("post_id") for r in eligible_positive if r["status"] == "extraction_failure"],
+            "image_detection_recall": len(detected) / len(eligible_positive) if eligible_positive else None,
             "conditional_image_detection_recall": len(detected) / len(observed) if observed else None,
-            "observation_recall": len(observed) / len(positive) if positive else None,
+            "observation_recall": len(observed) / len(eligible_positive) if eligible_positive else None,
             "records": records,
-            "note": "Not-observed known posts are collection misses, not proven extraction failures; duplicate disagreements are ambiguous."}
+            "note": "Wrong-group, group-unverified, outside-window and unknown-time fixtures are excluded from recall and reported separately; missing eligible posts are collection misses, not proven extraction failures."}
 
 
 def diagnostics(report: dict, runs: dict) -> dict:
@@ -300,7 +345,10 @@ def collect_pair(args, start, end, known, *, execute=subprocess.run) -> dict:
         stop = sorted(codes & STOP_CODES)
         if stop:
             halted = phase0.RunError(stop[0], "Collection stopped after an authentication/security/rate-limit response; retry only after manual resolution.")
-        print(f"[{collector}] run={run_id} status={raw['status']} window_complete={normalized.get('window', {}).get('complete', False)}", file=sys.stderr)
+        # Log only recognized codes, never upstream messages or credential values.
+        stop_codes = ",".join(stop)
+        reason = f" reason={stop_codes}" if stop_codes else ""
+        print(f"[{collector}] run={run_id} status={raw['status']} window_complete={normalized.get('window', {}).get('complete', False)}{reason}", file=sys.stderr)
     return finish_run(metadata, runs, known, directory)
 
 
@@ -329,7 +377,10 @@ def persist_suite(runs: list[dict], known: list[dict], output_dir: Path):
         for collector in COLLECTORS:
             v = run["images"][collector]
             lines += [f"- {collector}: known image posts={v['known_image_posts']}, observed={v['observed_known_image_posts']}, detected={v['detected_image_posts']}",
-                      f"  Extraction failures: {', '.join(v['extraction_failures']) or 'none established'}; not observed: {', '.join(v['missing_known_image_posts']) or 'none'}"]
+                      f"  Eligible in-window image fixtures: {v['eligible_known_image_posts']}; recall: {v['image_detection_recall']}",
+                      f"  Wrong group: {', '.join(map(str, v['wrong_group_posts'])) or 'none'}; group unverified: {', '.join(map(str, v['unverified_group_posts'])) or 'none'}",
+                      f"  Outside window (verified): {', '.join(map(str, v['outside_window_verified_posts'])) or 'none'}; timestamp unknown: {', '.join(map(str, v['timestamp_unknown_posts'])) or 'none'}",
+                      f"  Extraction failures: {', '.join(map(str, v['extraction_failures'])) or 'none established'}; not observed in window: {', '.join(map(str, v['missing_known_image_posts'])) or 'none'}"]
     lines += ["", "Known fixtures must be user-confirmed. Synthetic tests do not establish live image extraction or complete galleries."]
     write_markdown(output_dir / "image-investigation.md", "\n".join(lines) + "\n")
 
@@ -442,7 +493,8 @@ def main(argv=None) -> int:
                 persist_suite(runs, known, args.output_dir)
                 codes = {e.get("code") for c in COLLECTORS for e in run["collectors"][c]["errors"]}
                 if codes & STOP_CODES:
-                    print("[validation] STOP: authentication/security/rate-limit response. Resolve manually before another run.", file=sys.stderr)
+                    for code in sorted(codes & STOP_CODES):
+                        print(f"[validation] STOP: {code}. {STOP_HINTS[code]}", file=sys.stderr)
                     break
                 if index + 1 < args.runs and args.command == "repeat":
                     time.sleep(args.interval)

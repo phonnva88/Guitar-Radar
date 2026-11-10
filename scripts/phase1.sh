@@ -10,8 +10,9 @@ case "${1:-help}" in
       echo 'Install/start Docker Desktop with WSL integration, or Docker Engine with Compose v2, then rerun setup.' >&2
       exit 1
     fi
-    if [[ ! -x .bin/facebook-go || ! -x "$python_bin" ]]; then bash scripts/setup.sh; fi
-    "$python_bin" -m pip install -r radar/requirements.txt
+    # Rebuild even when an old binary exists: git pull may have updated the
+    # collector's media extraction code since the previous setup.
+    bash scripts/setup.sh
     "$python_bin" -m radar init-config
     compose up -d --wait
     "$python_bin" -m radar bootstrap

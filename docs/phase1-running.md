@@ -24,7 +24,7 @@ git pull --ff-only origin main
 bash scripts/phase1.sh setup
 ```
 
-Setup cài các package ứng dụng đã pin, tạo `.env.phase1` với mật khẩu ngẫu nhiên nếu chưa có, khởi động PostgreSQL cổng `127.0.0.1:54329`, tạo schema và group pilot `vegmpremium`. Setup không gọi Facebook và không ghi đè `.env` hay `.env.phase1` đã có.
+Setup cài các package đã pin, build lại collector Go để áp dụng thay đổi sau `git pull`, tạo `.env.phase1` với mật khẩu ngẫu nhiên nếu chưa có, khởi động PostgreSQL cổng `127.0.0.1:54329`, tạo schema và group pilot `vegmpremium`. Setup không gọi Facebook và không ghi đè `.env` hay `.env.phase1` đã có.
 
 Nếu đã có PostgreSQL riêng, không cần Compose: cài `radar/requirements.txt`, chạy `.venv/bin/python -m radar init-config`, sửa `RADAR_DATABASE_URL` trong `.env.phase1` trỏ tới database riêng rồi chạy `.venv/bin/python -m radar bootstrap`.
 

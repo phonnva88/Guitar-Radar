@@ -22,11 +22,13 @@ import (
 type captureKey struct{}
 
 type imageCandidate struct {
-	URL    string `json:"url"`
-	Width  any    `json:"width"`
-	Height any    `json:"height"`
-	Source string `json:"source"`
-	Path   string `json:"path"`
+	URL        string `json:"url"`
+	Width      any    `json:"width"`
+	Height     any    `json:"height"`
+	Source     string `json:"source"`
+	Path       string `json:"path"`
+	PhotoID    string `json:"photo_id,omitempty"`
+	photoScope string
 }
 
 type storyEvidence struct {
@@ -278,16 +280,7 @@ func (c *rawCapture) add(story map[string]any) {
 	record := &storyEvidence{Story: clean, Images: images, PossibleType: possible, TypeEvidence: evidence}
 	previous := c.Stories[id]
 	if previous != nil {
-		seen := map[string]bool{}
-		for _, im := range record.Images {
-			seen[im.URL] = true
-		}
-		for _, im := range previous.Images {
-			if !seen[im.URL] {
-				record.Images = append(record.Images, im)
-				seen[im.URL] = true
-			}
-		}
+		record.Images = deduplicateImages(append(record.Images, previous.Images...))
 		if record.PossibleType == "unknown" && len(record.Images) > 0 {
 			record.PossibleType = "photo_post"
 			record.TypeEvidence = []string{"proven photo/image metadata in an earlier response"}
@@ -398,9 +391,8 @@ var excludedMediaKeys = map[string]bool{"actors": true, "actor": true, "author":
 
 func extractImages(story map[string]any) []imageCandidate {
 	result := []imageCandidate{}
-	seen := map[string]bool{}
-	var walk func(any, string, bool, bool, int)
-	walk = func(value any, path string, attachment, photo bool, depth int) {
+	var walk func(any, string, bool, bool, string, string, int)
+	walk = func(value any, path string, attachment, photo bool, photoID, photoScope string, depth int) {
 		if depth > 32 {
 			return
 		}
@@ -419,18 +411,22 @@ func extractImages(story map[string]any) []imageCandidate {
 				}
 			}
 			photo = photo || typ == "photo" || typ == "image"
+			if typ == "photo" {
+				// Every nested Photo owns its renditions. Album/attachment IDs
+				// must never become the identity of all their child photos.
+				photoID, photoScope = scalarString(v["id"]), path
+			}
 			if photo {
 				for _, key := range []string{"uri", "url"} {
 					u := scalarString(v[key])
 					parsed, err := url.Parse(u)
 					// A Photo.url is commonly its Facebook permalink, not image bytes.
-					if err == nil && parsed.Hostname() != "" && parsed.User == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && !isFacebookPermalink(parsed) && !seen[u] {
-						seen[u] = true
+					if err == nil && parsed.Hostname() != "" && parsed.User == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && !isFacebookPermalink(parsed) {
 						source := "media"
 						if attachment {
 							source = "attachment"
 						}
-						result = append(result, imageCandidate{URL: u, Width: dimension(v["width"]), Height: dimension(v["height"]), Source: source, Path: path + "." + key})
+						result = append(result, imageCandidate{URL: u, Width: dimension(v["width"]), Height: dimension(v["height"]), Source: source, Path: path + "." + key, PhotoID: photoID, photoScope: photoScope})
 					}
 				}
 			}
@@ -446,16 +442,16 @@ func extractImages(story map[string]any) []imageCandidate {
 				}
 				inAttachment := attachment || lower == "attachments" || lower == "subattachments"
 				imageContext := photo || ((inAttachment || strings.Contains(path, ".media")) && (lower == "image" || lower == "images" || lower == "photo_image" || lower == "viewer_image" || lower == "photos"))
-				walk(v[key], path+"."+key, inAttachment, imageContext, depth+1)
+				walk(v[key], path+"."+key, inAttachment, imageContext, photoID, photoScope, depth+1)
 			}
 		case []any:
 			for i, child := range v {
-				walk(child, fmt.Sprintf("%s[%d]", path, i), attachment, photo, depth+1)
+				walk(child, fmt.Sprintf("%s[%d]", path, i), attachment, photo, photoID, photoScope, depth+1)
 			}
 		}
 	}
-	walk(story, "story", false, false, 0)
-	return result
+	walk(story, "story", false, false, "", "", 0)
+	return deduplicateImages(result)
 }
 
 func isFacebookPermalink(u *url.URL) bool {

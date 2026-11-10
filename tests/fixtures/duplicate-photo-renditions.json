@@ -1,0 +1,63 @@
+{
+  "description": "Metadata adapted from the user's collector output for post 29373505755576464; not a live fetch. Photo paths, dimensions, CDN hosts and object filenames are retained; signed and tracking query parameters are omitted.",
+  "post_id": "29373505755576464",
+  "expected_image_count": 4,
+  "image_candidates": [
+    {
+      "url": "https://scontent.fsgn2-9.fna.fbcdn.net/v/t39.30808-6/897384301_29234409696195716_4771406257957693077_n.jpg?cstp=mx1536x2048&ctp=p960x960",
+      "width": 960,
+      "height": 1280,
+      "source": "attachment",
+      "path": "story.attachments[0].styles.attachment.all_subattachments.nodes[0].media.image.uri"
+    },
+    {
+      "url": "https://scontent.fsgn2-9.fna.fbcdn.net/v/t39.30808-6/897384301_29234409696195716_4771406257957693077_n.jpg?cstp=mx1536x2048&ctp=s1536x2048",
+      "width": 1536,
+      "height": 2048,
+      "source": "attachment",
+      "path": "story.attachments[0].styles.attachment.all_subattachments.nodes[0].media.viewer_image.uri"
+    },
+    {
+      "url": "https://scontent.fsgn2-8.fna.fbcdn.net/v/t39.30808-6/900300949_29234409692862383_1056342825673471654_n.jpg?cstp=mx1536x2048&ctp=p960x960",
+      "width": 960,
+      "height": 1280,
+      "source": "attachment",
+      "path": "story.attachments[0].styles.attachment.all_subattachments.nodes[1].media.image.uri"
+    },
+    {
+      "url": "https://scontent.fsgn2-8.fna.fbcdn.net/v/t39.30808-6/900300949_29234409692862383_1056342825673471654_n.jpg?cstp=mx1536x2048&ctp=s1536x2048",
+      "width": 1536,
+      "height": 2048,
+      "source": "attachment",
+      "path": "story.attachments[0].styles.attachment.all_subattachments.nodes[1].media.viewer_image.uri"
+    },
+    {
+      "url": "https://scontent.fsgn2-9.fna.fbcdn.net/v/t39.30808-6/897342290_29234410282862324_2518725786468631418_n.jpg?cstp=mx1536x2048&ctp=p960x960",
+      "width": 960,
+      "height": 1280,
+      "source": "attachment",
+      "path": "story.attachments[0].styles.attachment.all_subattachments.nodes[2].media.image.uri"
+    },
+    {
+      "url": "https://scontent.fsgn2-9.fna.fbcdn.net/v/t39.30808-6/897342290_29234410282862324_2518725786468631418_n.jpg?cstp=mx1536x2048&ctp=s1536x2048",
+      "width": 1536,
+      "height": 2048,
+      "source": "attachment",
+      "path": "story.attachments[0].styles.attachment.all_subattachments.nodes[2].media.viewer_image.uri"
+    },
+    {
+      "url": "https://scontent.fsgn2-6.fna.fbcdn.net/v/t39.30808-6/896659802_29234410296195656_9214402717580907938_n.jpg?cstp=mx1536x2048&ctp=p960x960",
+      "width": 960,
+      "height": 1280,
+      "source": "attachment",
+      "path": "story.attachments[0].styles.attachment.all_subattachments.nodes[3].media.image.uri"
+    },
+    {
+      "url": "https://scontent.fsgn2-6.fna.fbcdn.net/v/t39.30808-6/896659802_29234410296195656_9214402717580907938_n.jpg?cstp=mx1536x2048&ctp=s1536x2048",
+      "width": 1536,
+      "height": 2048,
+      "source": "attachment",
+      "path": "story.attachments[0].styles.attachment.all_subattachments.nodes[3].media.viewer_image.uri"
+    }
+  ]
+}

@@ -57,6 +57,12 @@ Kết quả phân biệt có bài, thiếu bài đã xác nhận trong cửa s�
 
 **Có dữ liệu không đồng nghĩa đầy đủ.** Nếu chưa nhập nội dung/số ảnh chuẩn, độ đầy đủ caption/gallery vẫn chưa được đối chiếu. URL ảnh có thể hết hạn.
 
+### Ảnh có nhiều phiên bản kích thước
+
+Collector chọn một phiên bản có diện tích pixel lớn nhất cho cùng `Photo.id`, giữ nguyên URL đã chọn và metadata nguồn. Với Photo thiếu ID, các trường rendition trong cùng node được gộp trước. Khi chỉ còn URL, chỉ các tên object ảnh Facebook CDN dạng số đã nhận diện mới được gộp qua khác biệt hostname hoặc tham số resize/chữ ký; URL trên host khác được giữ riêng nếu chưa có bằng chứng cùng một ảnh. Các Photo có ID khác nhau vẫn được giữ riêng.
+
+Normalizer dùng cùng quy tắc nhận diện để xử lý các file raw cũ có nhiều URL rendition. Bản chụp của lượt đã lưu trong database giữ nguyên để bảo toàn bằng chứng lịch sử; chạy một lượt mới sau khi cập nhật collector để kiểm tra kết quả mới trên giao diện. `setup` build lại binary Go sau `git pull`, kể cả khi binary cũ đã tồn tại.
+
 Các mẫu chỉ chứng minh kết quả trên những bài đã kiểm tra. Muốn đo recall toàn bộ cửa sổ, cần danh sách đầy đủ từ nguồn kiểm tra độc lập. Ứng dụng không tự suy ra danh sách Facebook đầy đủ từ chính output bộ cào.
 
 ## Chạy riêng hai module

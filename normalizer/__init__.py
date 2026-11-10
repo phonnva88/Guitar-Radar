@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from .media import deduplicate_images, photo_identity
+
 COLLECTORS = ("facebook-go", "fbgql")
 FACEBOOK_HOSTS = {"facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com", "mbasic.facebook.com", "fb.com", "www.fb.com"}
 POST_TYPES = {"normal_post", "shared_post", "anonymous_post", "announcement", "reel", "video", "photo_post", "marketplace_style_post", "suggested_post", "unknown"}
@@ -185,15 +187,17 @@ def post_validation(post: dict) -> dict | None:
     candidates = post.get("image_candidates", [])
     if not isinstance(candidates, list):
         raise ValueError("Image candidates must be an array")
-    images, seen = [], set()
+    images = []
     for candidate in candidates:
         if not isinstance(candidate, dict):
             raise ValueError("Image candidate must be an object")
         url, source = web_url(candidate.get("url")), candidate.get("source")
-        if not url or source not in {"attachment", "media"} or url in seen:
+        if not url or source not in {"attachment", "media"}:
             continue
-        seen.add(url)
         image = {"url": url, "source": source, "path": text(candidate.get("path"))}
+        photo_id = photo_identity(candidate.get("photo_id"))
+        if photo_id is not None:
+            image["photo_id"] = photo_id
         for dimension in ("width", "height"):
             size = candidate.get(dimension)
             image[dimension] = size if type(size) is int and size > 0 else None
@@ -201,7 +205,7 @@ def post_validation(post: dict) -> dict | None:
     evidence = post.get("type_evidence", [])
     if not isinstance(evidence, list):
         raise ValueError("Post type evidence must be an array")
-    return {"image_candidates": images,
+    return {"image_candidates": deduplicate_images(images),
             "possible_type": post.get("possible_type") if post.get("possible_type") in POST_TYPES else "unknown",
             "type_evidence": [item for item in evidence if text(item)],
             "debug_file": text(post.get("debug_file")),

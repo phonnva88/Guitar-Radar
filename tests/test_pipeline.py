@@ -96,6 +96,55 @@ class NormalizerTests(unittest.TestCase):
         for value in (False, float("inf"), "2026-11-07T10:00:00", "invalid", 0, -1):
             self.assertIsNone(timestamp(value))
 
+    def test_photo_id_evidence_selects_best_rendition_and_preserves_distinct_photos(self):
+        candidates = [
+            {"url": "https://cdn.example/small", "photo_id": "photo-a", "width": 100, "height": 100, "source": "attachment", "path": "small"},
+            {"url": "https://cdn.example/large?oh=signed", "photo_id": "photo-a", "width": 1000, "height": 800, "source": "media", "path": "large"},
+            {"url": "https://cdn.example/large?oh=signed", "photo_id": "photo-b", "width": 1000, "height": 800, "source": "attachment", "path": "another-photo"}]
+        post = normalize_run(raw(posts=[go_post(image_candidates=candidates)]))["posts"][0]
+        self.assertEqual(post["images"], [candidates[1]["url"], candidates[2]["url"]])
+        self.assertEqual(post["validation"]["image_candidates"], candidates[1:])
+
+    def test_old_raw_eight_fbcdn_renditions_normalize_to_four_photos(self):
+        candidates = []
+        for index in range(4):
+            name = f"111_{222 + index}_333_n.jpg"
+            for size in (100, 800):
+                candidates.append({"url": f"https://scontent-{size}.fbcdn.net/v/t39/{name}?stp={size}&oh=signature-{size}",
+                                   "width": size, "height": size, "source": "attachment", "path": f"photos.{index}.image{size}"})
+        for collector, factory in (("facebook-go", go_post), ("fbgql", gql_post)):
+            with self.subTest(collector=collector):
+                envelope = raw(collector, [factory(image_candidates=candidates)])
+                post = normalize_run(envelope)["posts"][0]
+                self.assertEqual(post["validation"]["image_candidates"], candidates[1::2])
+                self.assertEqual(len(post["images"]), 4)
+                self.assertEqual(len(envelope["posts"][0]["image_candidates"]), 8)
+
+    def test_reported_post_duplicate_renditions_keep_four_full_size_photos(self):
+        fixture = json.loads((Path(__file__).parent / "fixtures/duplicate-photo-renditions.json").read_text())
+        candidates = fixture["image_candidates"]
+        self.assertEqual(len(candidates), 8)
+        for collector, factory in (("facebook-go", go_post), ("fbgql", gql_post)):
+            with self.subTest(collector=collector):
+                source = raw(collector, [factory(fixture["post_id"], image_candidates=candidates)])
+                post = normalize_run(source)["posts"][0]
+                self.assertEqual(post["post_id"], fixture["post_id"])
+                self.assertEqual(len(post["images"]), fixture["expected_image_count"])
+                self.assertEqual(post["validation"]["image_candidates"], candidates[1::2])
+                self.assertEqual(post["images"], [candidate["url"] for candidate in candidates[1::2]])
+                self.assertTrue(all(candidate["width"] == 1536 and candidate["height"] == 2048
+                                    for candidate in post["validation"]["image_candidates"]))
+                self.assertEqual(len(source["posts"][0]["image_candidates"]), 8)
+
+    def test_unknown_image_query_variants_remain_distinct_and_invalid_dimensions_do_not_win(self):
+        candidates = [{"url": f"https://cdn.example/image?v={index}", "width": 10, "height": 10,
+                       "source": "media", "path": None} for index in (1, 2)]
+        candidates.extend([{**candidates[0], "photo_id": "known", "width": 100, "height": 100},
+                           {**candidates[1], "photo_id": "known", "width": True, "height": float("inf")}])
+        post = normalize_run(raw(posts=[go_post(image_candidates=candidates)]))["posts"][0]
+        self.assertEqual(len(post["images"]), 3)
+        self.assertEqual(post["validation"]["image_candidates"][-1], candidates[2])
+
 
 class IdentityTests(unittest.TestCase):
     def test_same_id_matches_despite_urls(self):

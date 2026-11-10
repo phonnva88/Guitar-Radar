@@ -9,6 +9,8 @@ import math
 import re
 from urllib.parse import quote, quote_plus, unquote_plus, urlsplit, urlunsplit
 
+from normalizer.media import deduplicate_images, photo_identity
+
 _SENSITIVE = re.compile(r"cookie|authorization|password|passwd|access.?token|session|fb_dtsg|jazoest|csrf|credential|encrypt|api[-_]?key|(^|[-_])lsd($|[-_])|(^|_)xs($|_)|(^|_)c_user($|_)|(^|_)datr($|_)|(^|_)sb($|_)|(^|_)fr($|_)|secret|(^|[-_])token($|[-_])", re.I)
 _NOISE_KEYS = {"extensions", "tracking", "trackingdata", "tracking_data", "debug_info", "client_mutation_id", "headers", "request", "request_headers", "response_headers", "http_headers"}
 _EXCLUDE = {"actors", "actor", "author", "authors", "owner", "profile", "owning_profile", "avatar", "actor_photo", "profile_picture", "profile_photo", "feedback", "comments", "replies", "attached_story", "shared_story", "recommendations", "recommended_stories", "suggested_posts", "related_stories", "related_posts", "sponsored_data", "link_preview", "preview_image", "thumbnail", "thumbnail_image", "cover_photo", "cover_image"}
@@ -82,21 +84,24 @@ def _url(value):
 
 
 def _dimension(value):
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0:
+    if type(value) is int:
+        return value if value > 0 else None
+    if isinstance(value, float) and math.isfinite(value) and value > 0:
         return int(value)
     return None
 
 
 def extract_images(story) -> list[dict]:
     """Return URL/dimension/path evidence, excluding avatar/link/video previews."""
-    output, seen = [], set()
+    output = []
 
-    def walk(node, path="$", zone=False, image=False, photo=False, dimensions=(None, None), depth=0):
+    def walk(node, path="$", zone=False, image=False, photo=False, dimensions=(None, None), depth=0,
+             photo_id=None, photo_scope=None):
         if depth > 70:
             return
         if isinstance(node, list):
             for i, child in enumerate(node):
-                walk(child, f"{path}[{i}]", zone, image, photo, dimensions, depth + 1)
+                walk(child, f"{path}[{i}]", zone, image, photo, dimensions, depth + 1, photo_id, photo_scope)
             return
         if not isinstance(node, dict):
             return
@@ -111,6 +116,10 @@ def extract_images(story) -> list[dict]:
         styles = node.get("style_list")
         if isinstance(styles, list) and any(isinstance(style, str) and style.lower() in {"share", "link", "external", "share_link", "external_url"} for style in styles):
             return
+        if typename.lower() == "photo":
+            # A nested Photo starts a new identity, including when it has no ID.
+            photo_id, photo_scope = photo_identity(node.get("id")), path
+            dimensions = (None, None)
         photo = photo or typename.lower() in {"photo", "image", "photomedia", "photoattachment"}
         dimensions = (_dimension(node.get("width")) or dimensions[0], _dimension(node.get("height")) or dimensions[1])
         if zone and (image or photo):
@@ -118,20 +127,23 @@ def extract_images(story) -> list[dict]:
                 url = _url(node.get(key))
                 # A Facebook /photo(s)/ object URL is a permalink, not an image.
                 if url and not (urlsplit(url).hostname in {"facebook.com", "www.facebook.com", "m.facebook.com"} and not re.search(r"\.(?:jpe?g|png|webp|gif|avif)$", urlsplit(url).path, re.I)):
-                    if url not in seen:
-                        output.append({"url": url, "width": dimensions[0], "height": dimensions[1],
-                                       "source": "attachment" if "attachment" in path.lower() else "media", "path": f"{path}.{key}"})
-                        seen.add(url)
+                    candidate = {"url": url, "width": dimensions[0], "height": dimensions[1],
+                                 "source": "attachment" if "attachment" in path.lower() else "media", "path": f"{path}.{key}"}
+                    if photo_id is not None:
+                        candidate["photo_id"] = photo_id
+                    if photo_scope is not None:
+                        candidate["_photo_scope"] = photo_scope
+                    output.append(candidate)
         for key, child in node.items():
             low = str(key).lower()
             if low in _EXCLUDE or any(term in low for term in ("avatar", "thumbnail", "profile_picture", "link_preview", "recommend", "related_stor", "suggested")):
                 continue
             next_zone = zone or low in _MEDIA_KEYS or photo
             next_image = image or low in _IMAGE_KEYS
-            walk(child, f"{path}.{key}", next_zone, next_image, photo, dimensions, depth + 1)
+            walk(child, f"{path}.{key}", next_zone, next_image, photo, dimensions, depth + 1, photo_id, photo_scope)
 
     walk(story)
-    return output
+    return deduplicate_images(output)
 
 
 def classify_post(story) -> tuple[str, list[str]]:

@@ -53,6 +53,72 @@ class MediaTests(unittest.TestCase):
         value = {"photos": [photo("javascript:evil", -1, True), photo(), photo(), photo("https://user:secret@cdn.example.invalid/photo")]}
         self.assertEqual(len(extract_images(value)), 1)
 
+    def test_four_photos_with_two_renditions_return_four_largest_images(self):
+        nodes = []
+        for index in range(4):
+            nodes.append({"media": {"__typename": "Photo", "id": str(1000 + index),
+                         "image": {"uri": f"https://cdn.example.invalid/{index}?size=small", "width": 320, "height": 240},
+                         "viewer_image": {"uri": f"https://cdn.example.invalid/{index}?size=large&oh=signed", "width": 1600, "height": 1200}}})
+        images = extract_images({"attachments": [{"subattachments": {"nodes": nodes}}]})
+        self.assertEqual(len(images), 4)
+        self.assertEqual([item["photo_id"] for item in images], [str(1000 + i) for i in range(4)])
+        for index, item in enumerate(images):
+            self.assertEqual(item["url"], f"https://cdn.example.invalid/{index}?size=large&oh=signed")
+            self.assertEqual((item["width"], item["height"]), (1600, 1200))
+            self.assertIn("viewer_image.uri", item["path"])
+            self.assertNotIn("_photo_scope", item)
+
+    def test_same_photo_id_across_layouts_selects_largest_and_keeps_first_tie(self):
+        small = dict(photo("https://cdn.example.invalid/small", 100, 100), id="same")
+        large = dict(photo("https://cdn.example.invalid/large?oh=original", 800, 600), id="same")
+        tie = dict(photo("https://cdn.example.invalid/tie", 600, 800), id="same")
+        images = extract_images({"photos": [small, large, tie]})
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["url"], "https://cdn.example.invalid/large?oh=original")
+
+    def test_different_photo_ids_remain_distinct_even_when_urls_match(self):
+        images = extract_images({"photos": [dict(photo(), id="first"), dict(photo(), id="second")]})
+        self.assertEqual([item["photo_id"] for item in images], ["first", "second"])
+
+    def test_idless_photo_scope_resets_nested_identity_and_deduplicates_globally(self):
+        nested = photo("https://cdn.example.invalid/child-small", 100, 100)
+        nested["viewer_image"] = {"uri": "https://cdn.example.invalid/child-large", "width": 600, "height": 800}
+        parent = dict(photo("https://cdn.example.invalid/parent"), id="parent", nested=nested)
+        images = extract_images({"photos": [parent, photo("https://cdn.example.invalid/child-large", 600, 800)]})
+        self.assertEqual(len(images), 2)
+        self.assertEqual(images[0]["photo_id"], "parent")
+        self.assertEqual(images[1]["url"], "https://cdn.example.invalid/child-large")
+        self.assertNotIn("photo_id", images[1])
+
+    def test_album_id_never_collapses_child_photos(self):
+        value = {"attachments": [{"__typename": "PhotoAttachment", "id": "album", "subattachments": {"nodes": [
+            {"media": dict(photo("https://cdn.example.invalid/a"), id="a")},
+            {"media": dict(photo("https://cdn.example.invalid/b"), id="b")}]}}]}
+        self.assertEqual([item["photo_id"] for item in extract_images(value)], ["a", "b"])
+
+    def test_nested_photo_never_borrows_parent_dimensions(self):
+        value = {"photos": [{"__typename": "Photo", "id": "parent", "width": 2000, "height": 2000,
+                           "nested": {"__typename": "Photo", "id": "child",
+                                      "image": {"uri": "https://cdn.example.invalid/unknown-size"},
+                                      "viewer_image": {"uri": "https://cdn.example.invalid/known-size", "width": 800, "height": 600}}}]}
+        images = extract_images(value)
+        self.assertEqual(len(images), 1)
+        self.assertEqual((images[0]["url"], images[0]["width"], images[0]["height"]),
+                         ("https://cdn.example.invalid/known-size", 800, 600))
+
+    def test_known_fbcdn_object_fallback_retains_signed_best_url(self):
+        first = "https://scontent-a.fbcdn.net/v/t39.30808-6/111_222_333_n.jpg?stp=small&oh=one"
+        second = "https://scontent-b.fbcdn.net/v/t39.30808-6/111_222_333_n.jpg?stp=large&oh=two"
+        images = extract_images({"photos": [photo(first, 100, 100), photo(second, 800, 600)]})
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["url"], second)
+        for host, name in (("cdn.example.invalid", "111_222_333_n.jpg"),
+                           ("fbcdn.net.attacker.invalid", "111_222_333_n.jpg"),
+                           ("scontent.fbcdn.net", "unknown.jpg")):
+            with self.subTest(host=host, name=name):
+                urls = [f"https://{host}/{name}?v={i}" for i in (1, 2)]
+                self.assertEqual([item["url"] for item in extract_images({"photos": [photo(url) for url in urls]})], urls)
+
     def test_explicit_anonymous_and_shared_markers_classify(self):
         self.assertEqual(classify_post({"actors": [{"__typename": "GroupAnonAuthorProfile"}]})[0], "anonymous_post")
         self.assertEqual(classify_post({"attached_story": {"__typename": "Story"}})[0], "shared_post")

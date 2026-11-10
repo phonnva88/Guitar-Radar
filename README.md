@@ -2,6 +2,8 @@
 
 Ưu tiên hiện tại là [kiểm chứng bộ cào qua giao diện](docs/collector-verification.md): xem từng lượt, bài/thông tin thu được, so sánh cùng cửa sổ và đối chiếu bài đã biết. Mã chia thành `facebook_crawler` (thu thập) và `data_filter` (xử lý offline); `radar` điều phối, lưu trữ và hiển thị.
 
+Dashboard dùng Bootstrap, Tabulator, PhotoSwipe và Lucide được lưu trong dự án: bảng lượt chạy có tìm/lọc, so sánh hai lượt và gallery ảnh phóng to. Không cần Node để chạy. Các lựa chọn và phạm vi UI được ghi trong [đề xuất UI](docs/ui-next-phase-proposal.md).
+
 Ứng dụng vẫn có feed, quản lý group, PostgreSQL và lịch tùy chọn. Hướng dẫn cài đặt: [Chạy Phase 1](docs/phase1-running.md).
 
 Trong WSL Ubuntu, với Docker Desktop/Compose đã chạy:

@@ -4,7 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const state = {tab: "audit", groups: [], groupsLoaded: false, page: 1, feed: null, paused: false, feedRequest: 0};
   const pageInfo = {
-    audit: ["KIỂM TRA TỪNG NGUỒN DỮ LIỆU", "Bộ cào đã thu được những gì?", "Xem từng lượt, đối chiếu bài đã biết và kiểm tra thay đổi trong cùng cửa sổ thời gian."],
+    audit: ["COLLECTOR WORKSPACE", "Kiểm chứng bộ cào", "Theo dõi chất lượng dữ liệu, kiểm tra từng bài và đối chiếu các lượt thu thập."],
     feed: ["TẤT CẢ NGUỒN, MỘT NƠI", "Nhịp mới của cộng đồng.", "Những bài đăng bạn quan tâm, được tập hợp gọn gàng."],
     groups: ["CÁC NGUỒN BẠN TIN CẬY", "Theo dõi đúng cộng đồng.", "Quản lý các nhóm và chủ động thu thập khi cần."],
     duplicates: ["ÍT LẶP LẠI, DỄ THEO DÕI", "Xem lại trước khi gom bài.", "Bạn quyết định những bài nào thực sự là cùng một nội dung."],
@@ -52,8 +52,7 @@
     const card = node("article", compact ? "duplicate-item" : "post-card");
     const images = Array.isArray(post.images) ? post.images.map(x => safeURL(typeof x === "string" ? x : x.url)).filter(Boolean) : [];
     if (images.length && !compact) {
-      const wrap = node("div", "post-image-wrap"); const img = node("img"); img.src = images[0]; img.alt = "Ảnh đính kèm bài đăng"; img.loading = "lazy"; img.referrerPolicy = "no-referrer"; img.addEventListener("error", () => wrap.classList.add("image-failed")); wrap.append(img);
-      if (images.length > 1) wrap.append(node("span", "image-more", `${images.length} ảnh`)); card.append(wrap);
+      card.append(window.RadarGallery.create(post.images, {postId: post.post_id || post.id, compact: true}));
     }
     const body = compact ? card : node("div", "post-body");
     const top = node("div", "post-topline"); top.append(node("span", "group-chip", post.group_name || "Nhóm Facebook"), node("time", "post-time", formatDate(post.posted_at))); body.append(top);

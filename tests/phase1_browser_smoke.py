@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import uuid
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -42,7 +43,7 @@ def main():
             db.claim_next()
             posts = [{"post_id": str(n*100), "group_id": str(n), "url": f"https://www.facebook.com/groups/{n}/posts/{n*100}/",
                       "text": duplicate, "author_name": "Người bán demo", "posted_at": "2026-11-08T04:00:00Z",
-                      "images": ["https://images.example.invalid/guitar.svg"]}]
+                      "images": [f"https://images.example.invalid/guitar-{i}.svg" for i in range(1, 5)]}]
             if n == 101:
                 posts.append({"post_id": "10101", "group_id": "101", "url": "https://www.facebook.com/groups/101/posts/10101/",
                               "text": "Tìm chỗ sửa guitar acoustic. Dữ liệu thử riêng tư.", "images": [], "posted_at": "2026-11-07T03:00:00Z"})
@@ -78,11 +79,45 @@ def main():
                 content_type="image/svg+xml", body='<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><rect width="800" height="450" fill="#d1b38b"/><text x="90" y="230" font-size="50" fill="#312d28">Guitar Radar · Demo</text></svg>'))
             page = context.new_page()
             errors = []
+            console_errors = []
+            remote_requests = []
             page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+            context.on("request", lambda request: remote_requests.append(request.url)
+                       if urlsplit(request.url).hostname not in {"127.0.0.1", "images.example.invalid"} else None)
             page.goto(f"http://127.0.0.1:{port}")
             expect(page.locator("#panel-audit")).to_be_visible()
-            expect(page.locator(".audit-run-card")).to_have_count(3)
+            rows = page.locator("#audit-runs .tabulator-row")
+            expect(rows).to_have_count(3)
             expect(page.locator("#audit-runs")).to_contain_text("Không đổi trong cửa sổ đã quan sát")
+            # Tabulator search and status filters work without a server request.
+            page.locator("#audit-search").fill("Nhóm demo 202")
+            expect(rows).to_have_count(1)
+            page.locator("#audit-search").fill("")
+            expect(rows).to_have_count(3)
+            page.locator("#audit-status").select_option("failed")
+            expect(rows).to_have_count(0)
+            page.locator("#audit-status").select_option("")
+            expect(rows).to_have_count(3)
+            page.locator('#audit-runs .tabulator-col[tabulator-field="id"]').click()
+            expect(rows.first).to_contain_text("#1 ·")
+            page.locator('#audit-runs .tabulator-col[tabulator-field="id"]').click()
+            expect(rows.first).to_contain_text("#3 ·")
+            # The latest and oldest rows are repeats of group101's exact window.
+            rows.first.locator(".audit-select").check()
+            rows.last.locator(".audit-select").check()
+            page.locator("#audit-compare").click()
+            expect(page.locator("#audit-comparison")).to_be_visible()
+            expect(page.locator("#audit-comparison")).to_contain_text("Không đổi")
+            # Individually complete runs from different groups cannot imply stability.
+            rows.last.locator(".audit-select").uncheck()
+            rows.nth(1).locator(".audit-select").check()
+            page.locator("#audit-compare").click()
+            expect(page.locator("#audit-comparison")).to_contain_text("Chọn lại các lượt tương thích")
+            rows.nth(1).locator(".audit-select").uncheck()
+            rows.last.locator(".audit-select").check()
+            page.locator("#audit-compare").click()
+            expect(page.locator("#audit-comparison")).to_contain_text("Không đổi")
             page.locator(".audit-known-section > summary").click()
             page.locator("#audit-known-group").select_option(str(saved[0][0]["id"]))
             page.locator("#audit-known-url").fill("https://www.facebook.com/groups/101/posts/99999/")
@@ -92,15 +127,28 @@ def main():
             page.locator("#audit-known-text").fill("Nội dung chuẩn được xác nhận độc lập để kiểm tra lỗi thiếu bài.")
             page.locator("#audit-known-form button").click()
             expect(page.locator("#audit-known-count")).to_have_text("(1)")
-            page.locator(".audit-run-card").first.get_by_role("button", name="Xem từng bài").click()
+            rows.first.locator(".audit-inspect").click()
             expect(page.locator("#audit-run-details")).to_contain_text("Chưa thấy trong cửa sổ")
             page.locator(".audit-post").first.locator("summary").first.click()
             expect(page.locator("#audit-run-details .audit-post-text").first).to_contain_text("Fender")
+            gallery = page.locator("#audit-run-details .audit-post").first
+            expect(gallery.locator(".gallery-open")).to_have_count(4)
+            gallery.locator(".gallery-open").first.click()
+            expect(page.locator(".pswp")).to_be_visible()
+            # PhotoSwipe binds keyboard controls after its opening animation.
+            expect(page.locator(".pswp")).to_be_focused()
+            expect(page.locator(".pswp__counter")).to_have_text("1 / 4")
+            page.keyboard.press("ArrowRight")
+            expect(page.locator(".pswp__counter")).to_have_text("2 / 4")
+            page.keyboard.press("Escape")
+            expect(page.locator(".pswp")).to_have_count(0)
+            expect(gallery.locator(".gallery-open").first).to_be_focused()
             page.locator("#audit-run-details .audit-raw").first.locator("summary").click()
             expect(page.locator("#audit-run-details .audit-raw pre").first).to_contain_text('"message"')
             ROOT.joinpath("reports").mkdir(exist_ok=True)
+            page.evaluate("window.scrollTo(0, 0)")
             page.screenshot(path=str(ROOT / "reports/collector-audit-desktop.png"), full_page=True)
-            page.locator(".audit-run-card").first.get_by_role("button", name="Lặp lại cùng cửa sổ").click()
+            rows.first.locator(".audit-repeat").click()
             expect(page.locator("#audit-notice")).to_contain_text("Đã xếp lượt")
             repeat = db.list_runs()[0]
             assert repeat["status"] == "queued" and repeat["requested_from"].isoformat().startswith("2026-11-06")
@@ -140,12 +188,15 @@ def main():
             page.screenshot(path=str(ROOT / "reports/phase1-mobile.png"), full_page=True)
             page.locator('[data-tab="audit"]').click()
             expect(page.locator("#panel-audit")).to_be_visible()
-            expect(page.locator(".audit-run-card")).to_have_count(5)
+            expect(rows).to_have_count(5)
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Audit mobile overflow"
+            page.evaluate("window.scrollTo(0, 0)")
             page.screenshot(path=str(ROOT / "reports/collector-audit-mobile.png"), full_page=True)
             assert not errors, errors
+            assert not console_errors, console_errors
+            assert not remote_requests, remote_requests
             browser.close()
-        print("PASS: real database, authenticated audit/known-post/raw-details/fixed-window repeat/feed/search/merge/mobile; no Facebook requests")
+        print("PASS: real PostgreSQL, authenticated table sort/search/status, compatible/mismatched comparison, four-photo keyboard gallery, known-post/raw-details, repeat/feed/search/merge/mobile; no console/CSP errors or remote library requests; no Facebook requests")
     finally:
         if server:
             server.should_exit = True

@@ -1,0 +1,56 @@
+{
+  "asset_processing": "Official distributed files; sourceMappingURL comments removed. License text preserved. Tarball SHA512 integrity checked against registry metadata.",
+  "packages": [
+    {
+      "package": "bootstrap",
+      "version": "5.3.8",
+      "license": "MIT",
+      "tarball": "https://registry.npmjs.org/bootstrap/-/bootstrap-5.3.8.tgz",
+      "integrity": "sha512-HP1SZDqaLDPwsNiqRqi5NcP0SSXciX2s9E+RyqJIIqGo+vJeN5AJVM98CXmW/Wux0nQ5L7jeWUdplCEf0Ee+tg==",
+      "tarball_sha256": "8b02d4a7482e0f0a2b1da58f1c9c86830e96cc2f77f094f89e4681b19886bc38",
+      "files": {
+        "bootstrap/bootstrap.min.css": "8f8173cb2d8f867274aeb0cb15328e60f490c7f272351e51a55f1dabb486e4ff",
+        "bootstrap/LICENSE": "4620c84ad5ce8602ff65640ed6b7c8b78ebb9e036584f0ebc1ccc88206a4bb51"
+      }
+    },
+    {
+      "package": "tabulator-tables",
+      "version": "6.3.1",
+      "license": "MIT",
+      "tarball": "https://registry.npmjs.org/tabulator-tables/-/tabulator-tables-6.3.1.tgz",
+      "integrity": "sha512-qFW7kfadtcaISQIibKAIy0f3eeIXUVi8242Vly1iJfMD79kfEGzfczNuPBN/80hDxHzQJXYbmJ8VipI40hQtfA==",
+      "tarball_sha256": "cc30469bfaefa1a5f6757530775f46afbdd728826370748968efba4fa2bfe898",
+      "files": {
+        "tabulator/tabulator.min.css": "e3f112b189d7747b00f4991cbf5f3473c5e305057b024818d432f6e86b2e7f9e",
+        "tabulator/tabulator.min.js": "2070484f9f89ec356805c1bc5b73089dfa9a6cb3f3c7f2fe2c3571f7e925c528",
+        "tabulator/LICENSE": "6031e51b8450fa6047887f018951c8cf1456d98a5a08291774410c13696de18e"
+      }
+    },
+    {
+      "package": "photoswipe",
+      "version": "5.4.4",
+      "license": "MIT",
+      "tarball": "https://registry.npmjs.org/photoswipe/-/photoswipe-5.4.4.tgz",
+      "integrity": "sha512-WNFHoKrkZNnvFFhbHL93WDkW3ifwVOXSW3w1UuZZelSmgXpIGiZSNlZJq37rR8YejqME2rHs9EhH9ZvlvFH2NA==",
+      "tarball_sha256": "4615d56b1f4f8e40f70c9f433a97803e5131d7166285b467ff63d26e42ef397b",
+      "files": {
+        "photoswipe/photoswipe.css": "b0eaaae0b9de064d25e2f18517b9011a526d9b2142376e1c0febd096cebab9f3",
+        "photoswipe/photoswipe.esm.min.js": "542069771beb34dc461cdb9374da8af643c591ebf65d8ec36331dd9a0681ebd4",
+        "photoswipe/photoswipe-lightbox.esm.min.js": "b82c385604f90cc77082d8e1bd4f5ef7c9d3da62d95dcc3ff1691a4eb0dddd12",
+        "photoswipe/LICENSE": "2c223af0b21d32240087ee189eb70fd315907b6ade8b561e24265baccd6a98e7"
+      }
+    },
+    {
+      "package": "lucide",
+      "version": "1.70.0",
+      "license": "ISC",
+      "tarball": "https://registry.npmjs.org/lucide/-/lucide-1.70.0.tgz",
+      "integrity": "sha512-LxPqUjt8e5PT7JuvmnKc8ECAqgkbnLG3hIi/FV2JpqWdPWLbLCoI5P3jje/Lq84uNU2kCpe2webgyFFJJ9zPAA==",
+      "tarball_sha256": "1dfdcfaa86c42db871b59b94acfe34d6aa2a6273178bf39cfe3b6b315f7b5b77",
+      "files": {
+        "lucide/lucide.min.js": "26c8886ee4310042fb25a20226d5cfd5008375c00b8fe1124f82ad20d3b88395",
+        "lucide/LICENSE": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57"
+      }
+    }
+  ]
+}

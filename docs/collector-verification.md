@@ -42,12 +42,15 @@ Nếu thiếu manifest hoặc raw ở máy hiện tại, giao diện báo lỗi 
 
 ## Kiểm tra từng lượt và độ ổn định
 
-- Xem số dòng đầu vào, số bài sau chuẩn hóa, trạng thái success/partial/failed, cửa sổ thời gian, ID thiếu/trùng và tỉ lệ các trường **có dữ liệu**.
-- Mở chi tiết từng bài để xem caption, tác giả, permalink, thời điểm đăng và ảnh; so với output collector đầu vào đã loại bí mật.
+- Bảng lượt thu thập có tìm kiếm, lọc trạng thái, sắp xếp và phân trang trên tối đa 100 lượt gần nhất được tải. Xem số dòng đầu vào, số bài sau chuẩn hóa, trạng thái success/partial/failed, cửa sổ thời gian, ID thiếu/trùng và tỉ lệ các trường **có dữ liệu**.
+- Mở chi tiết từng bài để xem caption, tác giả, permalink, thời điểm đăng và toàn bộ gallery ảnh; bấm ảnh để phóng to, dùng phím mũi tên để đổi ảnh và Escape để đóng. Output collector đầu vào đã loại bí mật nằm trong phần nâng cao.
 - Những bản ghi đầu vào chưa có trong dữ liệu chuẩn hóa hiển thị riêng để điều tra bài ngoài cửa sổ hoặc lỗi xử lý.
 - Chọn group và một FROM/TO cố định bằng giờ Việt Nam. Chạy lượt đầu, chờ xong rồi **Lặp lại cùng cửa sổ**. Chỉ các lượt cùng numeric group, nguồn, FROM/TO và hoàn tất không lỗi mới được so sánh.
+- Đánh dấu hai lượt trong bảng rồi bấm **So sánh** để xem bài thêm/mất và các trường thay đổi. Các lượt khác group/nguồn/cửa sổ, chưa hoàn tất hoặc có ID thiếu/trùng không được kết luận ổn định. URL ảnh có thể thay đổi do Facebook ký lại URL dù ảnh gốc giữ nguyên.
 
 Giao diện chỉ ra bài biến mất/xuất hiện hoặc trường thay đổi. `stable_in_observed_window` chỉ nghĩa các mẫu so sánh giống nhau: hai lượt cùng bỏ sót một bài vẫn có thể giống nhau. Facebook cũng có thể sửa/xóa bài giữa các lượt. Lượt cũ không có bản chụp được báo chưa có bằng chứng chi tiết.
+
+Giao diện dùng Bootstrap, Tabulator, PhotoSwipe và Lucide được lưu cùng ứng dụng, có phiên bản cố định và giấy phép trong [danh sách thư viện](../radar/static/THIRD_PARTY.md). Cách cài/chạy giữ nguyên; không cần cài Node trên máy người dùng.
 
 ## Đối chiếu bài và thông tin đã biết
 

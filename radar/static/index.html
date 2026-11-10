@@ -6,7 +6,14 @@
   <meta name="color-scheme" content="light">
   <meta name="referrer" content="no-referrer">
   <title>Guitar Radar — Kiểm chứng bộ cào</title>
+  <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="/static/vendor/tabulator/tabulator.min.css">
+  <link rel="stylesheet" href="/static/vendor/photoswipe/photoswipe.css">
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/vendor/tabulator/tabulator.min.js" defer></script>
+  <script src="/static/vendor/lucide/lucide.min.js" defer></script>
+  <script src="/static/ui.js" defer></script>
+  <script src="/static/gallery.js" defer></script>
   <script src="/static/app.js" defer></script>
   <script src="/static/audit.js" defer></script>
 </head>
@@ -14,38 +21,45 @@
   <a class="skip-link" href="#main">Đến nội dung</a>
   <div class="app-shell">
     <aside class="sidebar" aria-label="Điều hướng chính">
-      <a class="brand" href="/" aria-label="Guitar Radar trang chủ"><span class="brand-mark" aria-hidden="true">g<span>r</span></span><span>Guitar<span class="brand-second">Radar</span></span></a>
-      <div class="sidebar-label">BỘ SƯU TẬP CỦA BẠN</div>
+      <a class="brand" href="/" aria-label="Guitar Radar trang chủ"><span class="brand-mark" aria-hidden="true"><i data-lucide="radar"></i></span><span>Guitar<span class="brand-second">Radar</span></span></a>
+      <div class="sidebar-label">KHÔNG GIAN LÀM VIỆC</div>
       <nav class="nav-list">
-        <button class="nav-item active" data-tab="audit" aria-current="page"><span class="nav-icon" aria-hidden="true">◉</span><span>Kiểm chứng bộ cào</span></button>
-        <button class="nav-item" data-tab="feed"><span class="nav-icon" aria-hidden="true">▤</span><span>Bảng tin</span><span class="nav-count" id="feed-count">—</span></button>
-        <button class="nav-item" data-tab="groups"><span class="nav-icon" aria-hidden="true">◎</span><span>Nhóm theo dõi</span><span class="nav-count" id="group-count">—</span></button>
-        <button class="nav-item" data-tab="duplicates"><span class="nav-icon" aria-hidden="true">▱</span><span>Bài có thể trùng</span></button>
-        <button class="nav-item" data-tab="runs"><span class="nav-icon" aria-hidden="true">◷</span><span>Lịch sử thu thập</span></button>
+        <button class="nav-item active" data-tab="audit" aria-current="page"><i class="nav-icon" data-lucide="scan-search" aria-hidden="true"></i><span>Kiểm chứng bộ cào</span></button>
+        <button class="nav-item" data-tab="feed"><i class="nav-icon" data-lucide="panels-top-left" aria-hidden="true"></i><span>Bảng tin</span><span class="nav-count" id="feed-count">—</span></button>
+        <button class="nav-item" data-tab="groups"><i class="nav-icon" data-lucide="users-round" aria-hidden="true"></i><span>Nhóm theo dõi</span><span class="nav-count" id="group-count">—</span></button>
+        <button class="nav-item" data-tab="duplicates"><i class="nav-icon" data-lucide="copy-check" aria-hidden="true"></i><span>Bài có thể trùng</span></button>
+        <button class="nav-item" data-tab="runs"><i class="nav-icon" data-lucide="history" aria-hidden="true"></i><span>Lịch sử thu thập</span></button>
       </nav>
       <div class="sidebar-foot"><span class="private-dot" aria-hidden="true"></span><div>Không gian riêng tư<small>Dành cho chủ sở hữu</small></div></div>
     </aside>
     <main id="main" class="main" tabindex="-1">
-      <header class="topbar"><span class="eyebrow">LẮNG NGHE CỘNG ĐỒNG GUITAR</span><span class="owner-label"><span class="owner-avatar" aria-hidden="true">G</span>Không gian của bạn</span></header>
-      <div class="page-heading"><div><div class="title-kicker" id="page-kicker">KIỂM TRA TỪNG NGUỒN DỮ LIỆU</div><h1 id="page-title">Bộ cào đã thu được những gì?</h1><p id="page-description">Xem từng lượt, đối chiếu bài đã biết và kiểm tra thay đổi trong cùng cửa sổ thời gian.</p></div><button id="refresh-button" class="button button-outline"><span aria-hidden="true">↻</span> Làm mới</button></div>
+      <header class="topbar"><span class="eyebrow">FACEBOOK COLLECTOR / WORKSPACE</span><span class="owner-label"><i data-lucide="lock-keyhole" aria-hidden="true"></i> Chế độ riêng tư</span></header>
+      <div class="page-heading"><div><div class="title-kicker" id="page-kicker">COLLECTOR WORKSPACE</div><h1 id="page-title">Kiểm chứng bộ cào</h1><p id="page-description">Theo dõi chất lượng dữ liệu, kiểm tra từng bài và đối chiếu các lượt thu thập.</p></div><button id="refresh-button" class="button button-outline"><i data-lucide="refresh-cw" aria-hidden="true"></i> Làm mới</button></div>
       <div id="notice" class="notice" role="status" hidden></div>
       <section id="collection-banner" class="collection-banner" aria-label="Trạng thái thu thập"><div class="collection-state"><span id="status-dot" class="status-dot" aria-hidden="true"></span><div><strong id="collection-title">Đang kiểm tra kết nối…</strong><p id="collection-description">Đọc trạng thái thu thập của bạn.</p></div></div><button id="resume-button" class="button button-dark" hidden>Tiếp tục thu thập</button></section>
 
       <section id="panel-audit" class="tab-panel" aria-label="Kiểm chứng bộ cào">
-        <div class="audit-evidence-note"><strong>Chưa đủ căn cứ để khẳng định không bỏ sót toàn bộ bài Facebook.</strong><p id="audit-coverage-note">Các lượt thu thập và bài đối chiếu cho biết điều đã quan sát được. Cần nguồn đối chiếu độc lập để đo phần còn thiếu.</p></div>
         <div id="audit-notice" class="notice" role="status" hidden></div>
-        <form id="audit-collect-form" class="audit-controls">
-          <label>Nhóm kiểm chứng<select id="audit-group"><option value="">Tất cả nhóm</option></select></label>
-          <label>Từ lúc (giờ Việt Nam)<input id="audit-start" type="datetime-local" step="1" required></label>
-          <label>Đến lúc (giờ Việt Nam)<input id="audit-end" type="datetime-local" step="1" required></label>
-          <button class="button button-dark" type="submit">Thu thập cửa sổ này</button>
-        </form>
-        <div class="audit-toolbar"><p>Cố định cùng nhóm và thời gian để đối chiếu các lần chạy. Mỗi lượt giữ một bản chụp riêng.</p><button id="audit-import" class="button button-outline" type="button">Nhập các lượt kiểm chứng đã lưu</button></div>
         <div class="audit-overview" id="audit-overview" aria-live="polite"></div>
-        <div class="section-line"><h2>Các lượt đã kiểm tra</h2><span class="muted" id="audit-runs-summary">Đang tải…</span></div>
-        <p class="audit-help" id="audit-stability-note">Số lượng bài tự thu thập chưa phải tổng số bài thật của group.</p>
-        <div id="audit-runs" class="audit-runs" aria-live="polite"></div>
-        <section id="audit-run-details" class="audit-run-details" aria-label="Chi tiết lượt kiểm chứng" hidden></section>
+        <section class="workspace-card collection-card" aria-label="Tạo lượt thu thập">
+          <div class="card-heading"><div><span class="section-kicker">THU THẬP MỚI</span><h2>Một nhóm. Một cửa sổ cố định.</h2></div><span class="timezone-pill"><i data-lucide="clock-3" aria-hidden="true"></i> Giờ Việt Nam · UTC+7</span></div>
+          <form id="audit-collect-form" class="audit-controls">
+            <label>Nhóm kiểm chứng<select id="audit-group"><option value="">Tất cả nhóm</option></select></label>
+            <label>Từ lúc<input id="audit-start" type="datetime-local" step="1" required></label>
+            <label>Đến lúc<input id="audit-end" type="datetime-local" step="1" required></label>
+            <button class="button button-dark" type="submit"><i data-lucide="play" aria-hidden="true"></i> Thu thập</button>
+          </form>
+          <div class="audit-toolbar"><p>Cố định thời gian để so sánh kết quả qua nhiều lượt.</p><button id="audit-import" class="button button-outline" type="button"><i data-lucide="folder-input" aria-hidden="true"></i> Nhập các lượt kiểm chứng đã lưu</button></div>
+        </section>
+        <section class="workspace-card audit-table-card" aria-label="Lịch sử kiểm chứng">
+          <div class="card-heading"><div><span class="section-kicker">LỊCH SỬ KIỂM CHỨNG</span><h2>Các lượt thu thập <span class="count-pill" id="audit-runs-summary">Đang tải…</span></h2></div><button id="audit-compare" class="button button-dark" type="button" disabled><i data-lucide="columns-2" aria-hidden="true"></i> <span>So sánh (0/2)</span></button></div>
+          <div class="table-toolbar"><label class="table-search"><i data-lucide="search" aria-hidden="true"></i><input id="audit-search" type="search" placeholder="Tìm theo nhóm, mã lượt, lỗi…" aria-label="Tìm lượt kiểm chứng"></label><label class="status-filter"><span>Trạng thái</span><select id="audit-status"><option value="">Tất cả trạng thái</option><option value="attention">Lượt cần xem lại</option><option value="success">Thành công</option><option value="partial">Chưa hoàn chỉnh</option><option value="failed">Có lỗi</option><option value="queued">Đang chờ</option><option value="running">Đang thu thập</option><option value="interrupted">Bị gián đoạn</option></select></label></div>
+          <div id="audit-runs" class="audit-runs" aria-label="Bảng lượt kiểm chứng" aria-busy="true"></div>
+          <div class="table-footnote"><i data-lucide="info" aria-hidden="true"></i><p id="audit-stability-note">Chọn hai lượt thành công, hoàn tất cùng nhóm, nguồn và cửa sổ để so sánh.</p></div>
+        </section>
+        <section id="audit-comparison" class="workspace-card audit-comparison" aria-label="So sánh hai lượt" hidden></section>
+        <section id="audit-run-details" class="workspace-card audit-run-details" aria-label="Chi tiết lượt kiểm chứng" hidden></section>
+        <div class="audit-evidence-note"><i data-lucide="shield-check" aria-hidden="true"></i><div><strong>Độ ổn định cần được đối chiếu độc lập.</strong><p id="audit-coverage-note">Các lượt giống nhau chưa chứng minh đã lấy đủ mọi bài Facebook. Hãy bổ sung bài, nội dung và số ảnh đã xác nhận để kiểm tra.</p></div></div>
         <details class="audit-known-section"><summary>Bài đối chiếu độc lập <span id="audit-known-count"></span></summary><p>Thêm permalink của bài bạn đã kiểm tra trực tiếp trên Facebook. Giờ đăng giúp phân biệt bài nằm ngoài cửa sổ với bài bị thiếu. Link share cần đổi thành permalink trước.</p>
           <form id="audit-known-form" class="audit-known-form">
             <label>Nhóm<select id="audit-known-group" required><option value="">Chọn nhóm</option></select></label>

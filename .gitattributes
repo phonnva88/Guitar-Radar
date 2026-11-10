@@ -4,3 +4,5 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+# Preserve pinned browser asset/license bytes so manifest checksums stay valid.
+radar/static/vendor/** -text -whitespace

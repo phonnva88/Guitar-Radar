@@ -4,11 +4,11 @@
   const $ = (id) => document.getElementById(id);
   const state = {tab: "audit", groups: [], groupsLoaded: false, page: 1, feed: null, paused: false, feedRequest: 0};
   const pageInfo = {
-    audit: ["COLLECTOR WORKSPACE", "Kiểm chứng bộ cào", "Theo dõi chất lượng dữ liệu, kiểm tra từng bài và đối chiếu các lượt thu thập."],
-    feed: ["TẤT CẢ NGUỒN, MỘT NƠI", "Nhịp mới của cộng đồng.", "Những bài đăng bạn quan tâm, được tập hợp gọn gàng."],
-    groups: ["CÁC NGUỒN BẠN TIN CẬY", "Theo dõi đúng cộng đồng.", "Quản lý các nhóm và chủ động thu thập khi cần."],
-    duplicates: ["ÍT LẶP LẠI, DỄ THEO DÕI", "Xem lại trước khi gom bài.", "Bạn quyết định những bài nào thực sự là cùng một nội dung."],
-    runs: ["BIẾT DỮ LIỆU ĐẾN TỪ ĐÂU", "Mọi lượt thu thập đều có dấu vết.", "Xem kết quả gần đây và những nguồn cần được chú ý."]
+    audit: ["Kiểm chứng bộ cào", "Theo dõi chất lượng dữ liệu, kiểm tra từng bài và đối chiếu các lượt thu thập."],
+    feed: ["Nhịp mới của cộng đồng.", "Những bài đăng bạn quan tâm, được tập hợp gọn gàng."],
+    groups: ["Theo dõi đúng cộng đồng.", "Quản lý các nhóm và chủ động thu thập khi cần."],
+    duplicates: ["Xem lại trước khi gom bài.", "Bạn quyết định những bài nào thực sự là cùng một nội dung."],
+    runs: ["Mọi lượt thu thập đều có dấu vết.", "Xem kết quả gần đây và những nguồn cần được chú ý."]
   };
   const errors = {
     authentication_failed: "Phiên Facebook cần được kiểm tra lại.", session_expired: "Phiên Facebook đã hết hạn.",
@@ -141,7 +141,7 @@
   function selectTab(tab) {
     state.tab = tab; for (const button of document.querySelectorAll("[data-tab]")) { const selected = button.dataset.tab === tab; button.classList.toggle("active", selected); if (selected) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current"); }
     for (const panel of document.querySelectorAll(".tab-panel")) panel.hidden = panel.id !== `panel-${tab}`;
-    const [kicker,title,description] = pageInfo[tab]; $("page-kicker").textContent = kicker; $("page-title").textContent = title; $("page-description").textContent = description; document.title = `${title} — Guitar Radar`;
+    const [title,description] = pageInfo[tab]; $("page-title").textContent = title; $("page-description").textContent = description; document.title = `${title} — Guitar Radar`;
     document.dispatchEvent(new CustomEvent("radar:tab", {detail: tab}));
     if (tab === "feed") loadFeed(); else if (tab === "runs") loadRuns(); else if (tab === "duplicates") loadDuplicates();
   }

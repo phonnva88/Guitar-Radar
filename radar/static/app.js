@@ -6,7 +6,7 @@
   const pageInfo = {
     audit: ["Kiểm chứng bộ cào", "Theo dõi chất lượng dữ liệu, kiểm tra từng bài và đối chiếu các lượt thu thập."],
     feed: ["Nhịp mới của cộng đồng.", "Những bài đăng bạn quan tâm, được tập hợp gọn gàng."],
-    groups: ["Theo dõi đúng cộng đồng.", "Quản lý các nhóm và chủ động thu thập khi cần."],
+    groups: ["Quản lí nhóm", "Quản lý các nhóm và chủ động thu thập khi cần."],
     duplicates: ["Xem lại trước khi gom bài.", "Bạn quyết định những bài nào thực sự là cùng một nội dung."],
     runs: ["Mọi lượt thu thập đều có dấu vết.", "Xem kết quả gần đây và những nguồn cần được chú ý."]
   };

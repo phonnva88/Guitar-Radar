@@ -89,12 +89,8 @@
     }
   }
   async function loadStatus() {
-    try {
-      const s = await api("/api/status"); state.paused = Boolean(s.paused_code); $("collection-banner").classList.toggle("paused", state.paused); $("resume-button").hidden = !state.paused;
-      $("collection-title").textContent = state.paused ? "Thu thập đang tạm dừng" : s.worker_active ? "Sẵn sàng theo dõi nguồn mới" : "Bộ thu thập chưa hoạt động";
-      $("collection-description").textContent = state.paused ? `${errors[s.paused_code] || "Tài khoản cần được kiểm tra."} Chỉ tiếp tục sau khi đã xử lý thủ công.` : s.worker_active ? "Dữ liệu mới sẽ xuất hiện sau mỗi lượt thu thập thành công." : "Bạn vẫn có thể xem dữ liệu đã lưu. Khởi động bộ thu thập để xử lý các lượt đang chờ.";
-      if (state.groupsLoaded) renderGroups();
-    } catch (e) { $("collection-title").textContent = "Chưa đọc được trạng thái"; $("collection-description").textContent = "Chọn Làm mới để kiểm tra lại kết nối."; throw e; }
+    const s = await api("/api/status"); state.paused = Boolean(s.paused_code);
+    if (state.groupsLoaded) renderGroups();
   }
   function feedParams() {
     const params = new URLSearchParams({page: String(state.page), page_size: "12"}); const q = $("search").value.trim(); if (q) params.set("q", q);
@@ -153,7 +149,6 @@
   $("previous-page").addEventListener("click", () => { if (state.page > 1) { state.page--; loadFeed(); } });
   $("next-page").addEventListener("click", () => { state.page++; loadFeed(); });
   $("group-form").addEventListener("submit", e => { e.preventDefault(); const button = e.currentTarget.querySelector("button"); action(button, async () => { await api("/api/groups", {method: "POST", body: JSON.stringify({name: $("group-name").value.trim(), url: $("group-url").value.trim()})}); $("group-form").reset(); notify("Đã thêm nhóm. Bạn có thể thu thập lượt đầu tiên ngay bên dưới."); await loadGroups(); }); });
-  $("resume-button").addEventListener("click", e => { const button = e.currentTarget; if (!window.confirm("Bạn đã xử lý thủ công vấn đề trên Facebook và muốn tiếp tục thu thập?")) return; action(button, async () => { await api("/api/collection/resume", {method: "POST", body: "{}"}); notify("Đã bỏ trạng thái tạm dừng. Bạn có thể xếp lượt thu thập mới."); await loadStatus(); }); });
   (async () => { const results = await Promise.allSettled([loadGroups(), loadStatus(), loadFeed()]); if (results.some(x => x.status === "rejected")) notify("Một phần trạng thái chưa tải được. Chọn Làm mới để thử lại.", true); })();
   setInterval(() => { if (!document.hidden) { loadStatus().catch(() => {}); if (state.tab === "runs") loadRuns(); } }, 30000);
 })();

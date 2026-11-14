@@ -61,13 +61,6 @@ h4{font-size:13px;font-weight:650}
 .muted{color:var(--muted);font-size:12px}
 .notice{padding:13px 17px;background:var(--green-soft);color:#235a3d;border:1px solid #cdddca;border-radius:8px;line-height:1.7;font-size:12px;margin-bottom:18px;overflow-wrap:anywhere}
 .notice.error{background:#fbede7;border-color:#edcbbd;color:#8a3f28}
-.collection-banner{display:flex;justify-content:space-between;align-items:center;gap:18px;border:1px solid #dce7d6;border-radius:9px;background:#eef4e9;padding:14px 18px;margin-bottom:24px}
-.collection-banner.paused{background:#fff2e2;border-color:#ecd8b8}
-.collection-state{display:flex;align-items:center;gap:13px}
-.collection-state strong{font-size:12px;font-weight:650}
-.collection-state p{font-size:11px;line-height:1.7;color:#60745f;margin:3px 0 0}
-.status-dot{height:8px;width:8px;border-radius:50%;background:#6a8e59;box-shadow:0 0 0 4px #6a8e5912;flex-shrink:0}
-.paused .status-dot{background:#b17b30;box-shadow:0 0 0 4px #b17b3012}
 .workspace-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;min-width:0;margin-bottom:24px}
 .card-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:22px 24px}
 .card-heading .section-kicker{font-size:8px;letter-spacing:1.4px;margin-bottom:5px}

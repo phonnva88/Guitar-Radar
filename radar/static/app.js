@@ -2,7 +2,7 @@
 
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = {tab: "audit", groups: [], groupsLoaded: false, page: 1, feed: null, paused: false, feedRequest: 0};
+  const state = {tab: "audit", groups: [], groupsLoaded: false, page: 1, feed: null, paused: false, collectionStatus: null, feedRequest: 0};
   const pageInfo = {
     audit: ["Kiểm chứng bộ cào", "Theo dõi chất lượng dữ liệu, kiểm tra từng bài và đối chiếu các lượt thu thập."],
     feed: ["Nhịp mới của cộng đồng.", "Những bài đăng bạn quan tâm, được tập hợp gọn gàng."],
@@ -33,6 +33,7 @@
       const response = await fetch(path, {...options, headers, signal: controller.signal, credentials: "same-origin"});
       let body; try { body = await response.json(); } catch { body = null; }
       if (!response.ok) {
+        if (response.status === 409) loadStatus().catch(() => {});
         let message = response.status === 401 ? "Vui lòng đăng nhập lại để tiếp tục." : "Yêu cầu chưa thực hiện được. Vui lòng thử lại.";
         if (body && typeof body.detail === "string") message = errors[body.detail] || body.detail;
         if (body && typeof body.error === "string") message = errors[body.error] || body.error;
@@ -85,13 +86,23 @@
       details.append(node("div", "group-meta", `Thành công gần nhất: ${group.last_success_at ? formatDate(group.last_success_at) : "chưa có"}`));
       if (group.last_error_code) details.append(node("div", "group-meta group-error", errors[group.last_error_code] || "Lượt thu thập gần nhất cần được kiểm tra.")); card.append(details);
       const actions = node("div", "group-actions"); const label = node("label", "toggle-label"); const toggle = node("input"); toggle.type = "checkbox"; toggle.checked = Boolean(group.enabled); label.append(toggle, node("span", "", "Theo dõi")); toggle.addEventListener("change", () => action(toggle, async () => { try { await api(`/api/groups/${group.id}`, {method: "PATCH", body: JSON.stringify({enabled: toggle.checked})}); await loadGroups(); } catch (e) { toggle.checked = !toggle.checked; throw e; } }));
-      const button = node("button", "button button-outline", "Thu thập ngay"); button.disabled = !group.enabled || state.paused; button.addEventListener("click", () => action(button, async () => { await api(`/api/groups/${group.id}/collect`, {method: "POST", body: "{}"}); notify(`Đã xếp lượt thu thập cho ${group.name}. Xem tiến trình ở Lịch sử thu thập.`); await loadStatus(); })); actions.append(label, button); card.append(actions); target.append(card);
+      const button = node("button", "button button-outline", "Thu thập ngay"); button.disabled = !group.enabled || !state.collectionStatus || state.paused; button.addEventListener("click", () => action(button, async () => { await ensureCollectionReady(); await api(`/api/groups/${group.id}/collect`, {method: "POST", body: "{}"}); notify(`Đã xếp lượt thu thập cho ${group.name}. Xem tiến trình ở Lịch sử thu thập.`); await loadStatus(); })); actions.append(label, button); card.append(actions); target.append(card);
     }
   }
   async function loadStatus() {
-    const s = await api("/api/status"); state.paused = Boolean(s.paused_code);
+    const s = await api("/api/status"); state.collectionStatus = s; state.paused = Boolean(s.paused_code);
+    $("collection-status").hidden = !state.paused;
+    const nextStep = s.paused_code === "rate_limited" ? "Chờ Facebook gỡ giới hạn rồi bấm Tiếp tục." : s.paused_code === "checkpoint_required" || s.paused_code === "account_restricted" ? "Xử lý yêu cầu trên Facebook rồi bấm Tiếp tục." : "Cập nhật phiên Facebook đã cấu hình rồi bấm Tiếp tục.";
+    $("collection-status-message").textContent = state.paused ? `${errors[s.paused_code] || "Phiên Facebook cần được kiểm tra."} ${nextStep}` : "";
     if (state.groupsLoaded) renderGroups();
+    document.dispatchEvent(new CustomEvent("radar:collection-status", {detail: s}));
+    return s;
   }
+  async function ensureCollectionReady() {
+    const s = await loadStatus();
+    if (s.paused_code) throw new Error($("collection-status-message").textContent);
+  }
+  window.RadarCollection = {get status() { return state.collectionStatus; }, refresh: loadStatus, ensureReady: ensureCollectionReady};
   function feedParams() {
     const params = new URLSearchParams({page: String(state.page), page_size: "12"}); const q = $("search").value.trim(); if (q) params.set("q", q);
     for (const [key, id] of [["group_id", "filter-group"], ["has_images", "filter-images"]]) if ($(id).value) params.set(key, $(id).value);
@@ -143,6 +154,11 @@
   }
   for (const button of document.querySelectorAll("[data-tab]")) button.addEventListener("click", () => selectTab(button.dataset.tab));
   $("refresh-button").addEventListener("click", (e) => action(e.currentTarget, refresh));
+  $("resume-collection").addEventListener("click", event => action(event.currentTarget, async () => {
+    await api("/api/collection/resume", {method: "POST", body: "{}"});
+    await loadStatus();
+    notify("Đã tiếp tục. Bạn có thể tạo lượt thu thập mới.");
+  }));
   $("filter-form").addEventListener("submit", e => { e.preventDefault(); state.page = 1; loadFeed(); });
   for (const id of ["filter-group", "filter-images", "filter-start", "filter-end"]) $(id).addEventListener("change", () => { state.page = 1; loadFeed(); });
   $("clear-filters").addEventListener("click", () => { $("filter-form").reset(); state.page = 1; loadFeed(); });

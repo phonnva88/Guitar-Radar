@@ -24,12 +24,22 @@
       if (options.method) Object.assign(headers, {"Content-Type": "application/json", "X-Radar-Request": "1"});
       const response = await fetch(path, {...options, headers, credentials: "same-origin", signal: controller.signal});
       let body; try { body = await response.json(); } catch { body = null; }
-      if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : "Không đọc được dữ liệu kiểm chứng. Kiểm tra kết nối và thử lại.");
+      if (!response.ok) {
+        if (response.status === 409) window.RadarCollection.refresh().catch(() => {});
+        throw new Error(typeof body?.detail === "string" ? body.detail : "Không đọc được dữ liệu kiểm chứng. Kiểm tra kết nối và thử lại.");
+      }
       return body;
     } catch (error) { if (error.name === "AbortError") throw new Error("Đọc dữ liệu kiểm chứng quá lâu. Hãy thử lại."); throw error; }
     finally { clearTimeout(timer); }
   }
-  async function action(button, task) { button.disabled = true; try { await task(); } catch (error) { notify(error.message, true); } finally { button.disabled = false; updateCompareButton(); } }
+  async function action(button, task) { if (button.dataset.busy) return; button.dataset.busy = "true"; button.disabled = true; try { await task(); } catch (error) { notify(error.message, true); } finally { delete button.dataset.busy; button.disabled = false; updateCompareButton(); updateCollectionButtons(); } }
+  function updateCollectionButtons() {
+    const paused = !window.RadarCollection.status || Boolean(window.RadarCollection.status.paused_code);
+    const group = state.groups.find(group => String(group.id) === $("audit-group").value);
+    const submit = $("audit-collect-form").querySelector("button");
+    submit.disabled = paused || !group?.enabled || Boolean(submit.dataset.busy);
+    for (const button of document.querySelectorAll(".audit-repeat")) button.disabled = paused || Boolean(button.dataset.busy);
+  }
   function localValue(instant) { return new Date(instant.getTime() + 7 * 3600000).toISOString().slice(0, 19); }
   function fromVietnam(value) {
     if (!value) return null;
@@ -46,6 +56,7 @@
       for (const group of state.groups) select.append(new Option(`${group.name}${group.enabled ? "" : " (đang tắt)"}`, group.id));
       select.value = previous;
     }
+    updateCollectionButtons();
   }
   function empty(target, message) { target.replaceChildren(el("div", "audit-empty", message)); }
   function metric(label, value, symbol, description, tone = "") {
@@ -82,6 +93,7 @@
   function statusBadge(run) { return el("span", `status-badge ${Object.hasOwn(statuses, run.status) ? run.status : ""}`, statuses[run.status] || "Chưa rõ trạng thái"); }
   function duration(run) { const ms = new Date(run.finished_at) - new Date(run.started_at); return run.started_at && run.finished_at && Number.isFinite(ms) && ms >= 0 ? `${(ms / 1000).toFixed(1)} giây` : "Chưa kết thúc"; }
   async function repeatRun(run) {
+    await window.RadarCollection.ensureReady();
     await api(`/api/audit/runs/${run.id}/repeat`, {method: "POST", body: "{}"}); notify("Đã xếp lượt mới với cùng cửa sổ cố định."); await refresh();
   }
   function applyTableFilter() {
@@ -112,7 +124,7 @@
         {title: "Kiểm chứng", field: "window_complete", minWidth: 185, responsive: 5, formatter(cell) { const run = cell.getRow().getData(); const wrap = el("div", "table-result"); wrap.append(el("span", run.window_complete ? "result-complete" : "", run.window_complete ? "Hoàn tất cửa sổ" : "Chưa xác nhận hoàn tất"), el("span", "", stabilityLabel(run.stability))); return wrap; }},
         {title: "Thao tác", width: 142, minWidth: 132, responsive: 0, headerSort: false, formatter(cell) {
           const run = cell.getRow().getData(); const wrap = el("div", "table-actions"); const inspect = el("button", "button button-outline audit-inspect", "Chi tiết"); inspect.type = "button"; inspect.setAttribute("aria-label", `Xem từng bài lượt #${run.id}`); inspect.addEventListener("click", () => action(inspect, () => showRun(run.id))); wrap.append(inspect);
-          if (run.window?.from && run.window?.to && !["queued", "running"].includes(run.status)) { const repeat = el("button", "button button-icon audit-repeat", "↻"); repeat.type = "button"; repeat.setAttribute("aria-label", `Lặp lại cùng cửa sổ lượt #${run.id}`); repeat.title = "Lặp lại cùng cửa sổ"; repeat.addEventListener("click", () => action(repeat, () => repeatRun(run))); wrap.append(repeat); } return wrap;
+          if (run.window?.from && run.window?.to && !["queued", "running"].includes(run.status)) { const repeat = el("button", "button button-icon audit-repeat", "↻"); repeat.type = "button"; repeat.disabled = !window.RadarCollection.status || Boolean(window.RadarCollection.status.paused_code); repeat.setAttribute("aria-label", `Lặp lại cùng cửa sổ lượt #${run.id}`); repeat.title = "Lặp lại cùng cửa sổ"; repeat.addEventListener("click", () => action(repeat, () => repeatRun(run))); wrap.append(repeat); } return wrap;
         }},
       ],
     });
@@ -239,12 +251,13 @@
     } catch (error) { if (request !== state.request) return; $("audit-runs").setAttribute("aria-busy", "false"); if (!state.table) empty($("audit-runs"), "Chưa đọc được dữ liệu kiểm chứng. Chọn Làm mới để thử lại."); notify(error.message, true); }
   }
   const end = new Date(); $("audit-end").value = localValue(end); $("audit-start").value = localValue(new Date(end.getTime() - 24 * 3600000));
-  $("audit-group").addEventListener("change", () => { state.selected.clear(); state.comparison++; $("audit-comparison").hidden = true; refresh(); });
+  $("audit-group").addEventListener("change", () => { state.selected.clear(); state.comparison++; $("audit-comparison").hidden = true; updateCollectionButtons(); refresh(); });
   $("audit-search").addEventListener("input", applyTableFilter); $("audit-status").addEventListener("change", applyTableFilter);
   $("audit-compare").addEventListener("click", event => action(event.currentTarget, compareSelected));
   $("audit-collect-form").addEventListener("submit", event => { event.preventDefault(); const button = event.currentTarget.querySelector("button"); action(button, async () => {
     const group = $("audit-group").value; if (!group) throw new Error("Chọn một group trước khi thu thập cửa sổ kiểm chứng.");
     const start = fromVietnam($("audit-start").value), end = fromVietnam($("audit-end").value); if (!start || !end || start >= end) throw new Error("Nhập khoảng thời gian có điểm bắt đầu trước điểm kết thúc.");
+    await window.RadarCollection.ensureReady();
     await api(`/api/groups/${group}/collect`, {method: "POST", body: JSON.stringify({start, end})}); notify("Đã xếp lượt kiểm chứng với cửa sổ cố định. Chọn Làm mới sau khi worker xử lý xong."); await refresh();
   }); });
   $("audit-import").addEventListener("click", event => action(event.currentTarget, async () => {
@@ -261,6 +274,8 @@
   }); });
   document.addEventListener("radar:tab", event => { state.active = event.detail === "audit"; if (state.active) { if (state.table) state.table.redraw(true); refresh(); } });
   document.addEventListener("radar:audit-refresh", refresh);
+  document.addEventListener("radar:collection-status", updateCollectionButtons);
   setInterval(() => { if (state.active && !document.hidden) refresh(); }, 30000);
+  updateCollectionButtons();
   refresh();
 })();

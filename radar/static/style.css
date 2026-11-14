@@ -61,6 +61,8 @@ h4{font-size:13px;font-weight:650}
 .muted{color:var(--muted);font-size:12px}
 .notice{padding:13px 17px;background:var(--green-soft);color:#235a3d;border:1px solid #cdddca;border-radius:8px;line-height:1.7;font-size:12px;margin-bottom:18px;overflow-wrap:anywhere}
 .notice.error{background:#fbede7;border-color:#edcbbd;color:#8a3f28}
+.collection-status{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.collection-status p{margin:4px 0 0}
 .workspace-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;min-width:0;margin-bottom:24px}
 .card-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:22px 24px}
 .card-heading .section-kicker{font-size:8px;letter-spacing:1.4px;margin-bottom:5px}

@@ -35,6 +35,10 @@
     <main id="main" class="main" tabindex="-1">
       <div class="page-heading"><div><h1 id="page-title">Kiểm chứng bộ cào</h1><p id="page-description">Theo dõi chất lượng dữ liệu, kiểm tra từng bài và đối chiếu các lượt thu thập.</p></div><button id="refresh-button" class="button button-outline"><i data-lucide="refresh-cw" aria-hidden="true"></i> Làm mới</button></div>
       <div id="notice" class="notice" role="status" hidden></div>
+      <div id="collection-status" class="notice error collection-status" role="status" hidden>
+        <div><strong>Thu thập đang tạm dừng.</strong><p id="collection-status-message"></p></div>
+        <button id="resume-collection" class="button button-outline" type="button">Tiếp tục</button>
+      </div>
 
       <section id="panel-audit" class="tab-panel" aria-label="Kiểm chứng bộ cào">
         <div id="audit-notice" class="notice" role="status" hidden></div>

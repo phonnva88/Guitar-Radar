@@ -53,6 +53,8 @@ Mặc định mỗi lượt nhìn lại 72 giờ, tối đa 50 trang × 20 bài;
 
 Nếu Facebook báo hết phiên, checkpoint, hạn chế tài khoản hoặc rate limit, worker dừng thu thập cho toàn bộ tài khoản. Xử lý thủ công trên Facebook, cập nhật session local rồi bấm **Tiếp tục**. Các giá trị đã export trước khi khởi động được ưu tiên hơn file; nếu muốn dùng `.env`, dừng app, chạy `unset FACEBOOK_COOKIE FACEBOOK_COOKIE_FILE FACEBOOK_USER_ID` và khởi động lại. Session lấy từ file được đọc lại cho từng lượt.
 
+Khi tạm dừng, thông báo xuất hiện phía trên mọi tab cùng nút **Tiếp tục**; nút thu thập và lặp lại lượt bị khóa. Cập nhật cookie không tự xóa trạng thái tạm dừng: sau khi xử lý phiên, bấm **Tiếp tục** rồi tạo lượt mới. API trả `409 Conflict` nếu tài khoản còn tạm dừng, group đang tắt hoặc group đã có lượt chờ/chạy; xem thông báo trên giao diện để xử lý đúng nguyên nhân.
+
 Worker và API có thể tách riêng: `.venv/bin/python -m radar serve --no-worker` và `.venv/bin/python -m radar worker`. Khóa PostgreSQL ngăn hai worker cùng chạy. Khi mất kết nối giữ khóa, worker ngừng tiến hành collection; worker thay thế chờ heartbeat cũ hết hạn trước khi khôi phục lượt.
 
 ## Duyệt bài đăng trùng
@@ -89,6 +91,8 @@ Sau khi kiểm tra, có thể đổi tên database trong `RADAR_DATABASE_URL` đ
 ```
 
 Các test API và worker dùng mock, không gọi Facebook. Test database thực chạy khi đặt `RADAR_TEST_DATABASE_URL` trỏ tới database thử riêng; mỗi test dùng schema riêng, không dùng database có dữ liệu cần giữ. Cài runtime ứng dụng trước khi chạy root tests. Các test collector/validation cũ tiếp tục chạy theo README POC.
+
+Kiểm thử luồng tạm dừng/tiếp tục của JavaScript bằng DOM giả lập (tùy chọn, cần Node): `npm install --prefix .cache/ui-tests --ignore-scripts --no-audit --no-fund jsdom@26.1.0`, rồi `node --test tests/collection_ui.test.cjs`. Test chỉ dùng phản hồi synthetic, không cần database hay Facebook.
 
 Kiểm thử trình duyệt tự động dùng `tests/phase1_browser_smoke.py`, cần `tests/requirements-browser.txt`, Chromium đã cài (`RADAR_CHROMIUM` nếu đường dẫn khác `/usr/bin/chromium`) và database thử riêng qua `RADAR_TEST_DATABASE_URL`. Script tự tạo/xóa schema, chỉ dùng bài synthetic, không gọi Facebook; ảnh chụp desktop/mobile lưu trong `reports/`.
 

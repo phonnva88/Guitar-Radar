@@ -48,6 +48,26 @@ class APITests(unittest.TestCase):
         for query in ("page=0", "page_size=101", "start=2026-11-08T00:00:00", "start=2026-11-09T00:00:00Z&end=2026-11-08T00:00:00Z"):
             self.assertEqual(self.client.get("/api/posts?" + query, headers=self.auth).status_code, 422)
 
+    def test_resume_clears_pause_and_allows_a_new_collection(self):
+        self.db.state.return_value = {"paused_code": "session_expired", "worker_active": True}
+        self.db.enqueue.side_effect = Conflict("Collection is paused; resolve the session/security issue and resume manually")
+        response = self.client.post("/api/groups/1/collect", headers=self.auth, json={})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("tạm dừng", response.json()["detail"])
+
+        def resume():
+            self.db.state.return_value = {"paused_code": None, "worker_active": True}
+            self.db.enqueue.side_effect = None
+            self.db.enqueue.return_value = {"id": 6, "status": "queued"}
+
+        self.db.resume_collection.side_effect = resume
+        response = self.client.post("/api/collection/resume", headers=self.auth, json={})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["paused_code"])
+        response = self.client.post("/api/groups/1/collect", headers=self.auth, json={})
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["status"], "queued")
+
     def test_manual_merge_requires_distinct_selected_posts(self):
         self.assertEqual(self.client.post("/api/duplicates/confirm", headers=self.auth,
                          json={"post_ids": [1, 1]}).status_code, 422)

@@ -82,7 +82,7 @@
     if (!state.groups.length) { empty(target, "Bắt đầu từ một cộng đồng", "Thêm đường dẫn nhóm bạn muốn theo dõi ở phía trên. Bạn luôn có thể tắt theo dõi sau này."); return; }
     target.replaceChildren();
     for (const group of state.groups) {
-      const card = node("article", "group-card"); card.append(node("div", "group-symbol", "◎")); const details = node("div", "group-details"); details.append(node("h3", "", group.name), link("Mở nhóm trên Facebook →", group.url));
+      const card = node("article", "group-card"); card.append(node("div", "group-symbol", "◎")); const details = node("div", "group-details"); details.append(node("h3", "", group.name), link("Mở nhóm trên Facebook", group.url));
       details.append(node("div", "group-meta", `Thành công gần nhất: ${group.last_success_at ? formatDate(group.last_success_at) : "chưa có"}`));
       if (group.last_error_code) details.append(node("div", "group-meta group-error", errors[group.last_error_code] || "Lượt thu thập gần nhất cần được kiểm tra.")); card.append(details);
       const actions = node("div", "group-actions"); const label = node("label", "toggle-label"); const toggle = node("input"); toggle.type = "checkbox"; toggle.checked = Boolean(group.enabled); label.append(toggle, node("span", "", "Theo dõi")); toggle.addEventListener("change", () => action(toggle, async () => { try { await api(`/api/groups/${group.id}`, {method: "PATCH", body: JSON.stringify({enabled: toggle.checked})}); await loadGroups(); } catch (e) { toggle.checked = !toggle.checked; throw e; } }));
@@ -115,7 +115,13 @@
   async function loadFeed() {
     const requestId = ++state.feedRequest; const target = $("feed-list"); loading(target); $("pagination").hidden = true;
     try {
-      const data = await api(`/api/posts?${feedParams()}`); if (requestId !== state.feedRequest) return; state.feed = data; $("feed-summary").textContent = `${data.total || 0} mục phù hợp`; $("stat-posts").textContent = String(data.total || 0); $("feed-count").textContent = String(data.total || 0);
+      const params = feedParams();
+      const filtered = ["q", "group_id", "has_images", "start", "end"].some(key => params.has(key));
+      const [data, allPosts] = await Promise.all([api(`/api/posts?${params}`), filtered ? api("/api/posts?page=1&page_size=1") : Promise.resolve(null)]);
+      if (requestId !== state.feedRequest) return;
+      state.feed = data; $("feed-summary").textContent = `${data.total || 0} mục phù hợp`;
+      const total = allPosts?.total ?? data.total ?? 0;
+      $("stat-posts").textContent = String(total); $("feed-count").textContent = String(total);
       if (!data.items || !data.items.length) { empty(target, "Chưa có bài đăng phù hợp", "Thử thay đổi bộ lọc, hoặc thêm nhóm rồi thu thập lượt đầu tiên. Bài đăng sẽ xuất hiện tại đây."); return; }
       target.replaceChildren(...data.items.map(post => renderPost(post))); const pages = Math.ceil(data.total / data.page_size); $("pagination").hidden = pages <= 1; $("page-label").textContent = `Trang ${data.page} / ${pages}`; $("previous-page").disabled = data.page <= 1; $("next-page").disabled = data.page >= pages;
     } catch (e) { if (requestId !== state.feedRequest) return; $("feed-summary").textContent = ""; failed(target, e, loadFeed); }
@@ -150,7 +156,7 @@
     for (const panel of document.querySelectorAll(".tab-panel")) panel.hidden = panel.id !== `panel-${tab}`;
     const [title,description] = pageInfo[tab]; $("page-title").textContent = title; $("page-description").textContent = description; document.title = `${title} — Guitar Radar`;
     document.dispatchEvent(new CustomEvent("radar:tab", {detail: tab}));
-    if (tab === "feed") loadFeed(); else if (tab === "runs") loadRuns(); else if (tab === "duplicates") loadDuplicates();
+    if (tab === "feed") { loadGroups().catch(() => {}); loadFeed(); } else if (tab === "runs") loadRuns(); else if (tab === "duplicates") loadDuplicates();
   }
   for (const button of document.querySelectorAll("[data-tab]")) button.addEventListener("click", () => selectTab(button.dataset.tab));
   $("refresh-button").addEventListener("click", (e) => action(e.currentTarget, refresh));
@@ -166,5 +172,5 @@
   $("next-page").addEventListener("click", () => { state.page++; loadFeed(); });
   $("group-form").addEventListener("submit", e => { e.preventDefault(); const button = e.currentTarget.querySelector("button"); action(button, async () => { await api("/api/groups", {method: "POST", body: JSON.stringify({name: $("group-name").value.trim(), url: $("group-url").value.trim()})}); $("group-form").reset(); notify("Đã thêm nhóm. Bạn có thể thu thập lượt đầu tiên ngay bên dưới."); await loadGroups(); }); });
   (async () => { const results = await Promise.allSettled([loadGroups(), loadStatus(), loadFeed()]); if (results.some(x => x.status === "rejected")) notify("Một phần trạng thái chưa tải được. Chọn Làm mới để thử lại.", true); })();
-  setInterval(() => { if (!document.hidden) { loadStatus().catch(() => {}); if (state.tab === "runs") loadRuns(); } }, 30000);
+  setInterval(() => { if (!document.hidden) { loadStatus().catch(() => {}); if (state.tab === "feed") { loadGroups().catch(() => {}); loadFeed(); } else if (state.tab === "runs") loadRuns(); } }, 30000);
 })();

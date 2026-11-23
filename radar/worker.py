@@ -44,7 +44,7 @@ class Worker:
         if not math.isfinite(poll_seconds) or not 0.01 <= poll_seconds <= 60:
             raise ValueError("poll_seconds must be between 0.01 and 60")
         self.db = db
-        self.collector = collector or FacebookCrawler(lookback_hours=lookback_hours)
+        self.collector = collector or FacebookCrawler(lookback_hours=lookback_hours, save_checkpoints=True)
         self.processor = processor or process_collection
         self.interval_seconds, self.poll_seconds = interval_seconds, poll_seconds
         self.clock = clock
@@ -68,13 +68,14 @@ class Worker:
             # Never emit exception text: upstream errors can contain credentials.
             self.db.fail_run(run["id"], "unknown_error")
         else:
+            checkpoint = raw.pop("_checkpoint", None) if isinstance(raw, dict) else None
             try:
                 envelope = self.processor(raw)
             except Exception:
                 self.db.fail_run(run["id"], processing_failure_code(raw), raw=raw)
                 return True
             try:
-                self.db.complete_run(run["id"], envelope, raw=raw)
+                self.db.complete_run(run["id"], envelope, raw=raw, checkpoint=checkpoint)
             except (ValueError, TypeError, KeyError):
                 self.db.fail_run(run["id"], processing_failure_code(raw), raw=raw)
             except Exception:

@@ -13,6 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from normalizer import FACEBOOK_HOSTS, timestamp, video_media_url
 from data_filter import FilterError, prepare_post, fingerprint, normalize_filters
@@ -122,7 +123,7 @@ class Database:
                 conn.execute("UPDATE collection_runs SET status='failed',error_code='group_disabled',finished_at=now() WHERE group_id=%s AND status='queued'", (group_id,))
             return row
 
-    def enqueue(self, group_id, start=None, end=None):
+    def enqueue(self, group_id=None, start=None, end=None, *, continue_from=None):
         if (start is None) != (end is None):
             raise InvalidInput("Both collection bounds are required")
         try:
@@ -133,6 +134,20 @@ class Database:
             state = conn.execute("SELECT * FROM app_state WHERE id=1 FOR UPDATE").fetchone()
             if state["paused_code"]:
                 raise Conflict("Collection is paused; resolve the session/security issue and resume manually")
+            if continue_from is not None:
+                previous = conn.execute("""SELECT r.group_id, c.run_id AS checkpoint_id,
+                                                  s.normalized->'window'->>'from' AS window_start,
+                                                  s.normalized->'window'->>'to' AS window_end
+                                           FROM collection_runs r
+                                           LEFT JOIN collector_checkpoints c ON c.run_id=r.id
+                                           LEFT JOIN collector_run_snapshots s ON s.run_id=r.id
+                                           WHERE r.id=%s""", (_positive_id(continue_from),)).fetchone()
+                if not previous:
+                    raise NotFound("Collection run not found")
+                if not previous["checkpoint_id"] or not previous["window_start"] or not previous["window_end"]:
+                    raise Conflict("This run has no saved position to continue from")
+                group_id = previous["group_id"]
+                bounds = normalize_filters(start=previous["window_start"], end=previous["window_end"])
             group = conn.execute("SELECT * FROM monitored_groups WHERE id=%s FOR UPDATE", (_positive_id(group_id),)).fetchone()
             if not group:
                 raise NotFound("Group not found")
@@ -140,8 +155,9 @@ class Database:
                 raise Conflict("This group is disabled")
             if conn.execute("SELECT id FROM collection_runs WHERE group_id=%s AND status IN ('queued','running')", (group_id,)).fetchone():
                 raise Conflict("This group already has an active collection")
-            return conn.execute("INSERT INTO collection_runs(group_id,status,requested_from,requested_to) VALUES(%s,'queued',%s,%s) RETURNING *",
-                                (group_id, bounds["start"], bounds["end"])).fetchone()
+            return conn.execute("""INSERT INTO collection_runs(group_id,status,requested_from,requested_to,continued_from)
+                                   VALUES(%s,'queued',%s,%s,%s) RETURNING *""",
+                                (group_id, bounds["start"], bounds["end"], continue_from)).fetchone()
 
     def claim_next(self):
         if self._worker_connection is not None:
@@ -151,14 +167,17 @@ class Database:
                 return None
             if conn.execute("SELECT id FROM collection_runs WHERE status='running' LIMIT 1").fetchone():
                 return None
-            row = conn.execute("""SELECT r.id,r.group_id,r.requested_from,r.requested_to,g.url AS group_url,g.name AS group_name
+            row = conn.execute("""SELECT r.id,r.group_id,r.requested_from,r.requested_to,g.url AS group_url,g.name AS group_name,
+                                         c.state AS checkpoint
                                   FROM collection_runs r JOIN monitored_groups g ON g.id=r.group_id
-                                  WHERE r.status='queued' AND g.enabled ORDER BY r.id FOR UPDATE OF r SKIP LOCKED LIMIT 1""").fetchone()
+                                  LEFT JOIN collector_checkpoints c ON c.run_id=r.continued_from
+                                  WHERE r.status='queued' AND g.enabled
+                                  ORDER BY r.id FOR UPDATE OF r SKIP LOCKED LIMIT 1""").fetchone()
             if row:
                 conn.execute("UPDATE collection_runs SET status='running',started_at=now() WHERE id=%s", (row["id"],))
             return row
 
-    def complete_run(self, run_id, envelope, *, raw=None):
+    def complete_run(self, run_id, envelope, *, raw=None, checkpoint=None):
         if not isinstance(envelope, dict) or envelope.get("status") not in ("success", "partial", "failed"):
             raise InvalidInput("Invalid collection envelope")
         status = envelope["status"]
@@ -223,13 +242,31 @@ class Database:
                                          (stored_id, position, video["video_id"], video["kind"], video["thumbnail_url"],
                                           video["duration_seconds"], video["width"], video["height"], video["playback_url"],
                                           video["playback_url_expires_at"], video["playback_url_ephemeral"]))
-                from radar.audit import capture_run
+                from radar.audit import capture_run, extend_snapshot
+                posts_count = len(prepared)
+                if run["continued_from"]:
+                    previous = conn.execute("SELECT raw,normalized FROM collector_run_snapshots WHERE run_id=%s",
+                                            (run["continued_from"],)).fetchone()
+                    if not previous or raw is None:
+                        raise InvalidInput("Continuation requires both collector snapshots")
+                    envelope = extend_snapshot(previous["normalized"], envelope, id_field="post_id")
+                    raw = extend_snapshot(previous["raw"], raw, id_field="id")
+                    posts_count = len({item["post_id"] for item in envelope["posts"]})
+                    window_complete = envelope["window"]["complete"]
+                    if status == "success" and not window_complete:
+                        status, code = "partial", "incomplete_window"
                 capture_run(conn, run, envelope, raw=raw)
+                saved_checkpoint = (checkpoint is not None and status == "partial" and code == "incomplete_window" and
+                                    (envelope.get("window") or {}).get("stop_reason") in {"timeout", "page_limit"})
+                if saved_checkpoint:
+                    conn.execute("INSERT INTO collector_checkpoints(run_id,state) VALUES(%s,%s)", (run_id, Jsonb(checkpoint)))
+                if run["continued_from"] and (status == "success" or saved_checkpoint):
+                    conn.execute("DELETE FROM collector_checkpoints WHERE run_id=%s", (run["continued_from"],))
                 conn.execute("UPDATE monitored_groups SET last_error_code=%s,last_success_at=CASE WHEN %s='success' THEN now() ELSE last_success_at END WHERE id=%s", (code, status, group["id"]))
                 if pause:
                     conn.execute("UPDATE app_state SET paused_code=%s WHERE id=1", (pause,))
                 return conn.execute("""UPDATE collection_runs SET status=%s,error_code=%s,finished_at=now(),posts_count=%s,window_complete=%s,source=%s
-                                       WHERE id=%s RETURNING *""", (status, code, len(prepared), window_complete, source, run_id)).fetchone()
+                                       WHERE id=%s RETURNING *""", (status, code, posts_count, window_complete, source, run_id)).fetchone()
         except psycopg.errors.UniqueViolation:
             raise InvalidInput("A canonical post identity is already attached to another group or post") from None
 

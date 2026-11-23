@@ -15,7 +15,7 @@ async function until(check, context = () => "") {
   assert.ok(check(), `UI did not reach the expected state: ${context()}`);
 }
 
-async function mount(t, paused = "session_expired") {
+async function mount(t, paused = "session_expired", canContinue = false) {
   const dom = new JSDOM(fs.readFileSync(path.join(root, "index.html"), "utf8"), {
     url: "http://localhost:8000", runScripts: "outside-only",
   });
@@ -56,11 +56,15 @@ async function mount(t, paused = "session_expired") {
       posts: server.runDetailPosts,
     };
     else if (url.startsWith("/api/audit?") || url === "/api/audit") body = {
-      runs: [{id: 1, group_id: 1, status: "success", window: {from: "2026-11-13T00:00:00Z", to: "2026-11-14T00:00:00Z"}}], known_posts: [],
+      runs: [{id: 1, group_id: 1, status: canContinue ? "partial" : "success", can_continue: canContinue,
+        window: {from: "2026-11-13T00:00:00Z", to: "2026-11-14T00:00:00Z"}}], known_posts: [],
     };
     else if (url === "/api/groups/1/collect") {
       status = server.conflict ? 409 : 202;
       body = server.conflict ? {detail: "Group đang có lượt chờ hoặc đang chạy."} : {id: 2, status: "queued"};
+    } else if (url === "/api/audit/runs/1/continue") {
+      status = 202;
+      body = {id: 2, status: "queued", continued_from: 1};
     } else throw new Error(`Unexpected test request: ${url}`);
     return {ok: status < 400, status, json: async () => body};
   };
@@ -74,6 +78,18 @@ async function mount(t, paused = "session_expired") {
   await new Promise(resolve => setTimeout(resolve, 20));
   return {w, $, server};
 }
+
+test("a saved collection position offers continuation for the same window", async t => {
+  const {$, server} = await mount(t, null, true);
+  const button = $(".audit-repeat");
+  assert.equal(button.textContent, "Quét tiếp");
+  button.click();
+  await until(() => $("#audit-notice").textContent.includes("quét tiếp"));
+  const call = server.calls.find(request => request.url === "/api/audit/runs/1/continue");
+  assert.equal(call.method, "POST");
+  assert.equal(call.headers["X-Radar-Request"], "1");
+  assert.equal(call.body, "{}");
+});
 
 test("paused collection shows recovery and blocks collect/repeat in both tabs", async t => {
   const {$, server} = await mount(t);

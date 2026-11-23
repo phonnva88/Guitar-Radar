@@ -18,7 +18,7 @@ from scripts import phase0
 
 
 class CrawlerTests(unittest.TestCase):
-    def crawl(self, change=None, *, returncode=0, timed_out=False, requested=None):
+    def crawl(self, change=None, *, returncode=0, timed_out=False, requested=None, save_checkpoints=False):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -39,6 +39,10 @@ class CrawlerTests(unittest.TestCase):
                    "window": {"from": field("--from"), "to": field("--to"), "complete": True, "stop_reason": "feed_exhausted"}}
             if change:
                 change(raw)
+            if save_checkpoints:
+                self.resume_input = json.loads(Path(field("--resume-from")).read_text())
+                self.saved_checkpoint = {"group": "9", "cursor": "next-cursor", "from": field("--from"), "to": field("--to")}
+                Path(field("--checkpoint-output")).write_text(json.dumps(self.saved_checkpoint))
             self.output = Path(field("--output"))
             self.output.write_text(json.dumps(raw))
             if timed_out:
@@ -47,6 +51,7 @@ class CrawlerTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"FACEBOOK_COOKIE": "c_user=12; xs=SYNTHETIC_SESSION_SECRET"}, clear=True):
             return FacebookCrawler(root=root, execute=execute, resolve_group=lambda *_a, **_kw: "9",
+                                   save_checkpoints=save_checkpoints,
                                    load_env=lambda: None, now=lambda: datetime(2026, 11, 8, 12, tzinfo=timezone.utc))(
                                        {"group_url": "9", **(requested or {})})
 
@@ -82,6 +87,18 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(len(raw["posts"]), 2)
         self.assertFalse(raw["window"]["complete"])
         self.assertEqual(raw["errors"], [{"code": "network_error"}])
+
+    def test_worker_passes_checkpoint_in_private_files_with_no_page_cap(self):
+        starting_checkpoint = {"cursor": "previous-cursor"}
+        raw = self.crawl(
+            lambda envelope: envelope["window"].update(complete=False, stop_reason="timeout"),
+            requested={"checkpoint": starting_checkpoint}, save_checkpoints=True,
+        )
+        self.assertEqual(self.command[self.command.index("--pages") + 1], "0")
+        self.assertEqual(self.resume_input, starting_checkpoint)
+        self.assertEqual(raw["_checkpoint"], self.saved_checkpoint)
+        self.assertNotIn("previous-cursor", self.command)
+        self.assertFalse(Path(self.command[self.command.index("--resume-from") + 1]).exists())
 
     def test_fixed_window_is_identical_across_runs_and_keeps_outside_rows(self):
         requested = {"requested_from": "2026-11-07T18:00:00+07:00",

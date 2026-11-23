@@ -47,7 +47,9 @@ Nếu cổng 54329 đang dùng, sửa `RADAR_DB_PORT` và cổng trong `RADAR_DA
 3. Xem trạng thái trong tab **Lịch sử**. Một worker xử lý các lượt theo thứ tự; group đang chờ/chạy không được xếp thêm lượt trùng.
 4. Mở **Bảng tin** để tìm kiếm, lọc group/ngày/có ảnh. Các ngày trên giao diện dùng giờ Việt Nam và gửi mốc có múi giờ tới API.
 
-Mặc định mỗi lượt nhìn lại 72 giờ, tối đa 50 trang × 20 bài; đây là cửa sổ hữu hạn, không phải backfill toàn bộ group. Lượt chạm giới hạn trang hoặc lỗi giữa chừng được ghi partial; bài hợp lệ đã có vẫn được lưu. Nếu worker bị dừng bất thường, lượt running được đánh dấu interrupted khi worker mới có quyền chạy. Lặp lại collection cập nhật bài có cùng ID, giữ thời điểm thấy lần đầu và không tạo bản sao.
+Mặc định mỗi lượt nhìn lại 72 giờ và yêu cầu 20 bài mỗi trang. Radar quét đến mốc bắt đầu hoặc hết feed, với thời gian tối đa 5 phút mỗi lượt. Khi hết thời gian và đã lưu được vị trí trang tiếp theo, mở **Kiểm chứng bộ cào** và chọn **Quét tiếp** ở lượt chưa hoàn chỉnh. Lượt mới giữ cùng khoảng ngày và tổng hợp bài đã tìm thấy qua các phần. Nếu Facebook từ chối vị trí đã lưu, dùng biểu mẫu khoảng ngày để thu thập lại từ đầu.
+
+Bài hợp lệ đã thu vẫn được lưu khi lượt dừng giữa chừng. Nếu worker bị dừng bất thường, lượt đang chạy được đánh dấu gián đoạn khi worker mới có quyền chạy. Các lượt cũ giới hạn 50 trang chưa có vị trí để quét tiếp. Mở **Kiểm chứng bộ cào** và dùng nút lặp để chạy lại cùng khoảng ngày theo cơ chế mới.
 
 ## Lịch chạy và phiên hết hạn
 

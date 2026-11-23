@@ -96,6 +96,27 @@ def capture_run(conn, run, envelope, raw=None):
                     ON CONFLICT(run_id) DO NOTHING""", (run["id"], Jsonb(normalized), Jsonb(raw) if raw is not None else None))
 
 
+def extend_snapshot(previous, current, *, id_field):
+    """Combine observations across checkpointed segments with the same scope."""
+    if not isinstance(previous, dict) or not isinstance(previous.get("window"), dict):
+        raise _errors()[0]("Previous collector snapshot is missing")
+    before, after = previous["window"], current["window"]
+    if (any(before[key] != after[key] for key in ("from", "to")) or
+            any(previous.get(key) != current.get(key) for key in ("collector", "group_id", "source"))):
+        raise _errors()[0]("Continuation scope differs from the previous run")
+    window = dict(after)
+    for key in ("scanned_posts", "unknown_timestamp_posts", "ordering_violations"):
+        window[key] = before.get(key, 0) + after.get(key, 0)
+    window["complete"] = after["complete"] and not (window["unknown_timestamp_posts"] or window["ordering_violations"])
+    current_ids = {post[id_field] for post in current["posts"] if post.get(id_field)}
+    posts = [post for post in previous["posts"] if post.get(id_field) not in current_ids]
+    result = {**current, "window": window, "posts": posts + current["posts"]}
+    for key in ("pages_fetched", "duration_ms"):
+        result[key] = (previous.get(key) or 0) + (current.get(key) or 0)
+    result.pop("normalization", None)  # Segment-only counts would misdescribe the combined result.
+    return result
+
+
 def capture_failure(conn, run, raw, code):
     """Keep safe acquisition evidence when offline processing rejects a run."""
     if not isinstance(raw, dict):
@@ -135,7 +156,7 @@ def _window_key(envelope):
 def _stats(row):
     envelope = row.get("normalized")
     raw = row.get("raw")
-    result = {key: row.get(key) for key in ("id", "group_id", "group_name", "status", "source", "error_code", "posts_count", "window_complete", "started_at", "finished_at")}
+    result = {key: row.get(key) for key in ("id", "group_id", "group_name", "status", "source", "error_code", "posts_count", "window_complete", "started_at", "finished_at", "continued_from", "can_continue")}
     result.update(snapshot_available=isinstance(envelope, dict), raw_snapshot_available=isinstance(raw, dict),
                   window=envelope.get("window") if isinstance(envelope, dict) else None)
     if not result["window"] and row.get("requested_from") and row.get("requested_to"):
@@ -201,7 +222,9 @@ def _stability(rows):
 
 def _rows(conn, group_id=None, limit=100):
     where, params = (" WHERE r.group_id=%s", [group_id]) if group_id is not None else ("", [])
-    return conn.execute("""SELECT r.*,g.name AS group_name,s.normalized,s.raw FROM collection_runs r
+    return conn.execute("""SELECT r.*,g.name AS group_name,s.normalized,s.raw,
+                           EXISTS(SELECT 1 FROM collector_checkpoints c WHERE c.run_id=r.id) AS can_continue
+                           FROM collection_runs r
                            JOIN monitored_groups g ON g.id=r.group_id
                            LEFT JOIN collector_run_snapshots s ON s.run_id=r.id""" + where +
                         " ORDER BY r.id DESC LIMIT %s", (*params, limit)).fetchall()
@@ -268,7 +291,9 @@ def run_details(db, run_id):
     if type(run_id) is not int or run_id < 1:
         raise _errors()[0]("Expected a positive run record ID")
     with db.connect() as conn:
-        row = conn.execute("""SELECT r.*,g.name AS group_name,s.normalized,s.raw FROM collection_runs r
+        row = conn.execute("""SELECT r.*,g.name AS group_name,s.normalized,s.raw,
+                              EXISTS(SELECT 1 FROM collector_checkpoints c WHERE c.run_id=r.id) AS can_continue
+                              FROM collection_runs r
                               JOIN monitored_groups g ON g.id=r.group_id LEFT JOIN collector_run_snapshots s ON s.run_id=r.id
                               WHERE r.id=%s""", (run_id,)).fetchone()
         if not row:

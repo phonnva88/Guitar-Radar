@@ -49,6 +49,7 @@ type envelope struct {
 	Errors         []collectorError  `json:"errors"`
 	Posts          []json.RawMessage `json:"posts"`
 	Window         *windowInfo       `json:"window"`
+	Checkpoint     *checkpoint       `json:"-"`
 }
 
 type windowInfo struct {
@@ -63,6 +64,8 @@ type windowInfo struct {
 
 type config struct {
 	Group, Output, RunID, DebugDir string
+	ResumeFrom, CheckpointOutput   string
+	Resume                         *checkpoint
 	Pages, PageSize                int
 	Timeout                        time.Duration
 	From, To                       time.Time
@@ -199,7 +202,17 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 	seenCursors := map[string]bool{}
 	seenPosts := map[string]bool{}
 	var previousTime time.Time
-	for pageNo := 1; pageNo <= cfg.Pages; pageNo++ {
+	unordered := false
+	if cfg.Resume != nil {
+		cursor = cfg.Resume.Cursor
+		seenCursors, seenPosts = cfg.Resume.SeenCursors, cfg.Resume.SeenPosts
+		previousTime, unordered = cfg.Resume.PreviousTime, cfg.Resume.Unordered
+	}
+	for pageNo := 1; cfg.Pages == 0 || pageNo <= cfg.Pages; pageNo++ {
+		if result.Window != nil && ctx.Err() == context.DeadlineExceeded {
+			result.Window.StopReason = "timeout"
+			break
+		}
 		capture.PageStoryCount = 0
 		capture.InvalidCursor = false
 		capture.FeedSeen = false
@@ -208,7 +221,12 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 			Sort: groups.SortChronological, Cursor: cursor, Count: cfg.PageSize,
 		})
 		if err != nil {
-			result.Errors = append(result.Errors, classify(err, "fetch", pageNo))
+			failure := classify(err, "fetch", pageNo)
+			if result.Window != nil && ctx.Err() == context.DeadlineExceeded && failure.Code == "network_error" {
+				result.Window.StopReason = "timeout"
+			} else {
+				result.Errors = append(result.Errors, failure)
+			}
 			break
 		}
 		result.PagesFetched++
@@ -231,6 +249,7 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 					if !seenPosts[post.ID] {
 						if !previousTime.IsZero() && post.CreatedAt.After(previousTime) {
 							result.Window.OrderingViolations++
+							unordered = true
 						}
 						previousTime = post.CreatedAt
 					}
@@ -292,18 +311,21 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 			}
 			break
 		}
-		if result.Window != nil && allOlder && result.Window.OrderingViolations == 0 {
+		if result.Window != nil && allOlder && !unordered {
 			result.Window.StopReason = "older_than_from"
 			result.Window.Complete = true
 			break
 		}
 		if page.NextCursor == "" || seenCursors[page.NextCursor] {
 			result.Errors = append(result.Errors, collectorError{Code: "pagination_stalled", Stage: "pagination", Message: "missing or repeated pagination cursor; collection stopped", Page: pageNo})
+			if result.Window != nil {
+				result.Window.StopReason = "pagination_stalled"
+			}
 			break
 		}
 		seenCursors[page.NextCursor] = true
 		cursor = page.NextCursor
-		if result.Window != nil {
+		if result.Window != nil && pageNo == cfg.Pages {
 			result.Window.StopReason = "page_limit"
 		}
 	}
@@ -313,6 +335,26 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 	if result.Window != nil {
 		if result.Window.UnknownTimestampPosts > 0 || result.Window.OrderingViolations > 0 || len(result.Errors) > 0 {
 			result.Window.Complete = false
+		}
+		if cfg.CheckpointOutput != "" && cursor != "" && len(result.Errors) == 0 &&
+			(result.Window.StopReason == "timeout" || result.Window.StopReason == "page_limit") {
+			safe := true
+			for seen := range seenCursors {
+				if containsMediaSecret(seen, capture.Secrets) {
+					safe = false
+					break
+				}
+			}
+			if safe {
+				for id := range seenPosts {
+					if containsMediaSecret(id, capture.Secrets) {
+						delete(seenPosts, id)
+					}
+				}
+				result.Checkpoint = &checkpoint{Group: result.GroupID, Account: cookies.CUser, From: cfg.From, To: cfg.To,
+					PageSize: cfg.PageSize, Cursor: cursor, SeenCursors: seenCursors, SeenPosts: seenPosts,
+					PreviousTime: previousTime, Unordered: unordered}
+			}
 		}
 		fmt.Fprintf(log, "[facebook-go] window_complete=%t stop_reason=%s scanned=%d unknown_timestamps=%d ordering_violations=%d\n", result.Window.Complete, result.Window.StopReason, result.Window.ScannedPosts, result.Window.UnknownTimestampPosts, result.Window.OrderingViolations)
 	}
@@ -359,7 +401,9 @@ func run(args []string, getenv func(string) string, stderr io.Writer, factory cl
 	fs.StringVar(&cfg.Group, "group", getenv("FACEBOOK_GROUP_ID"), "numeric Facebook group ID or group URL")
 	fs.StringVar(&cfg.Output, "output", "data/raw/facebook-go.json", "raw JSON output")
 	fs.StringVar(&cfg.RunID, "run-id", "", "shared benchmark run ID")
-	fs.IntVar(&cfg.Pages, "pages", 2, "maximum pages / window safety cap (1..200)")
+	fs.IntVar(&cfg.Pages, "pages", 2, "maximum pages (1..200, or 0 for a time window without a page cap)")
+	fs.StringVar(&cfg.ResumeFrom, "resume-from", "", "private input checkpoint file")
+	fs.StringVar(&cfg.CheckpointOutput, "checkpoint-output", "", "private output checkpoint file")
 	fs.IntVar(&cfg.PageSize, "page-size", 20, "posts per page (1..20)")
 	fs.Float64Var(&timeoutSeconds, "timeout", 120, "total request budget in seconds")
 	fs.StringVar(&fromText, "from", "", "inclusive lower timestamp, RFC3339 with timezone")
@@ -377,7 +421,7 @@ func run(args []string, getenv func(string) string, stderr io.Writer, factory cl
 		cfg.Timeout = time.Duration(timeoutSeconds * float64(time.Second))
 	}
 	if errors.Is(parseErr, flag.ErrHelp) {
-		fmt.Fprintln(stderr, "facebook-go --group ID|URL [--pages 2] [--page-size 20] [--timeout 120] [--from RFC3339 --to RFC3339] [--debug-dir DIR] [--output PATH] [--run-id ID]")
+		fmt.Fprintln(stderr, "facebook-go --group ID|URL [--pages 2] [--page-size 20] [--timeout 120] [--from RFC3339 --to RFC3339] [--debug-dir DIR] [--output PATH] [--run-id ID] [--resume-from FILE] [--checkpoint-output FILE]")
 		return 0
 	}
 	if cfg.RunID == "" {
@@ -394,13 +438,20 @@ func run(args []string, getenv func(string) string, stderr io.Writer, factory cl
 		result.Errors = append(result.Errors, collectorError{Code: "unknown_error", Stage: "configuration", Message: "invalid CLI options; use --help"})
 	case groupErr != nil:
 		result.Errors = append(result.Errors, collectorError{Code: "unknown_error", Stage: "configuration", Message: groupErr.Error()})
-	case cfg.Pages < 1 || cfg.Pages > 200 || cfg.PageSize < 1 || cfg.PageSize > 20 || cfg.Timeout <= 0 || windowErr:
-		result.Errors = append(result.Errors, collectorError{Code: "unknown_error", Stage: "configuration", Message: "pages must be 1..200; page-size 1..20; timeout 0..3600 seconds; supply both --from/--to RFC3339 in ascending order"})
+	case cfg.Pages < 0 || cfg.Pages > 200 || cfg.PageSize < 1 || cfg.PageSize > 20 || cfg.Timeout <= 0 || windowErr ||
+		(result.Window == nil && (cfg.Pages == 0 || cfg.ResumeFrom != "" || cfg.CheckpointOutput != "")):
+		result.Errors = append(result.Errors, collectorError{Code: "unknown_error", Stage: "configuration", Message: "invalid page limit, page size, timeout or time window; unbounded pagination and checkpoints require a time window"})
 	default:
 		cookies, err := parseCookies(getenv("FACEBOOK_COOKIE"), getenv("FACEBOOK_USER_ID"))
 		if err != nil {
 			result.Errors = append(result.Errors, collectorError{Code: "authentication_failed", Stage: "configuration", Message: err.Error()})
-		} else {
+		} else if cfg.ResumeFrom != "" {
+			cfg.Resume, err = readCheckpoint(cfg.ResumeFrom, cfg, result.GroupID, cookies.CUser)
+			if err != nil {
+				result.Errors = append(result.Errors, collectorError{Code: "invalid_cursor", Stage: "configuration", Message: "saved checkpoint does not match the current group, account or window"})
+			}
+		}
+		if len(result.Errors) == 0 {
 			fmt.Fprintf(stderr, "[facebook-go] starting group=%s\n", groupID)
 			ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 			collect(ctx, cfg, cookies, factory, &result, stderr)
@@ -419,6 +470,11 @@ func run(args []string, getenv func(string) string, stderr io.Writer, factory cl
 	if err := writeJSON(cfg.Output, result); err != nil {
 		fmt.Fprintln(stderr, "[facebook-go] output_error: cannot write JSON output")
 		return 1
+	}
+	if result.Checkpoint != nil {
+		if err := writeJSON(cfg.CheckpointOutput, result.Checkpoint); err != nil {
+			fmt.Fprintln(stderr, "[facebook-go] checkpoint could not be saved")
+		}
 	}
 	for _, e := range result.Errors {
 		fmt.Fprintf(stderr, "[facebook-go] %s stage=%s page=%d: %s\n", e.Code, e.Stage, e.Page, e.Message)

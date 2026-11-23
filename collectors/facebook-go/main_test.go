@@ -24,6 +24,16 @@ type fakeClient struct {
 	panicAt int
 }
 
+type deadlineClient struct{ fakeClient }
+
+func (f *deadlineClient) ListGroupPosts(ctx context.Context, user, group string, opts groups.PostListOptions) (groups.FeedPage, error) {
+	if opts.Cursor != "" {
+		<-ctx.Done()
+		return groups.FeedPage{}, ctx.Err()
+	}
+	return f.fakeClient.ListGroupPosts(ctx, user, group, opts)
+}
+
 func (f *fakeClient) ListGroupPosts(_ context.Context, user, group string, opts groups.PostListOptions) (groups.FeedPage, error) {
 	f.calls = append(f.calls, opts)
 	if f.panicAt == len(f.calls) {
@@ -99,6 +109,45 @@ func TestRepeatedCursorStops(t *testing.T) {
 	_, result, _ := invoke(t, f, nil, "--pages", "10")
 	if result.Status != "partial" || result.Errors[0].Stage != "pagination" || len(f.calls) != 2 {
 		t.Fatalf("result: %+v", result)
+	}
+}
+
+func TestWindowWithoutPageLimitCanReadPastPage50(t *testing.T) {
+	f := &fakeClient{}
+	for page := 1; page <= 52; page++ {
+		f.pages = append(f.pages, groups.FeedPage{
+			Posts:   []groups.Post{{ID: fmt.Sprint(page), CreatedAt: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)}},
+			HasNext: page < 52, NextCursor: fmt.Sprintf("page-%d", page+1),
+		})
+	}
+	code, result, _ := invoke(t, f, nil, "--pages", "0", "--from", "2026-11-07T00:00:00Z", "--to", "2026-11-08T00:00:00Z")
+	if code != 0 || result.PagesFetched != 52 || !result.Window.Complete {
+		t.Fatalf("unexpected result across %d pages: %+v", result.PagesFetched, result.Window)
+	}
+}
+
+func TestTimeoutSavesNextCursorForContinuation(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "checkpoint.json")
+	f := &deadlineClient{fakeClient{pages: []groups.FeedPage{{
+		Posts:   []groups.Post{{ID: "10", CreatedAt: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)}},
+		HasNext: true, NextCursor: "saved-next-page",
+	}}}}
+	window := []string{"--pages", "0", "--from", "2026-11-07T00:00:00Z", "--to", "2026-11-08T00:00:00Z"}
+	code, first, log := invoke(t, f, nil, append(window, "--timeout", "0.15", "--checkpoint-output", state)...)
+	if code != 0 || first.Window.Complete || first.Window.StopReason != "timeout" || strings.Contains(log, "saved-next-page") {
+		t.Fatalf("unexpected timed-out run: %+v", first.Window)
+	}
+	next := &fakeClient{pages: []groups.FeedPage{{Posts: []groups.Post{
+		{ID: "11", CreatedAt: time.Date(2026, 11, 7, 11, 0, 0, 0, time.UTC)},
+	}}}}
+	code, second, _ := invoke(t, next, nil, append(window, "--resume-from", state)...)
+	if code != 0 || !second.Window.Complete || len(next.calls) != 1 || next.calls[0].Cursor != "saved-next-page" {
+		t.Fatalf("unexpected continuation result: %+v", second.Window)
+	}
+	wrongScope := &fakeClient{}
+	code, mismatch, _ := invoke(t, wrongScope, nil, append(window, "--resume-from", state, "--group", "1000")...)
+	if code != 1 || len(wrongScope.calls) != 0 || mismatch.Errors[0].Code != "invalid_cursor" {
+		t.Fatal("a different group could use the saved cursor")
 	}
 }
 

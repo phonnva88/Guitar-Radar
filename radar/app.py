@@ -200,6 +200,10 @@ def create_app(settings: Settings, database: Database | None = None) -> FastAPI:
             raise HTTPException(409, "Lượt này chưa có cửa sổ thời gian để lặp lại.")
         return db.enqueue(detail["run"]["group_id"], start=bounds["from"], end=bounds["to"])
 
+    @app.post("/api/audit/runs/{run_id}/continue", status_code=202)
+    def continue_run(run_id: int):
+        return db.enqueue(continue_from=run_id)
+
     @app.post("/api/audit/known-posts", status_code=201)
     def known_post(body: KnownPostCreate):
         from radar.audit import add_known_post

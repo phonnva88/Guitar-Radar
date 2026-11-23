@@ -94,7 +94,10 @@
   function duration(run) { const ms = new Date(run.finished_at) - new Date(run.started_at); return run.started_at && run.finished_at && Number.isFinite(ms) && ms >= 0 ? `${(ms / 1000).toFixed(1)} giây` : "Chưa kết thúc"; }
   async function repeatRun(run) {
     await window.RadarCollection.ensureReady();
-    await api(`/api/audit/runs/${run.id}/repeat`, {method: "POST", body: "{}"}); notify("Đã xếp lượt mới với cùng cửa sổ cố định."); await refresh();
+    const operation = run.can_continue ? "continue" : "repeat";
+    await api(`/api/audit/runs/${run.id}/${operation}`, {method: "POST", body: "{}"});
+    notify(run.can_continue ? "Đã xếp lượt quét tiếp từ vị trí đã lưu." : "Đã xếp lượt mới với cùng cửa sổ cố định.");
+    await refresh();
   }
   function applyTableFilter() {
     if (!state.table) return;
@@ -124,7 +127,17 @@
         {title: "Kiểm chứng", field: "window_complete", minWidth: 185, responsive: 5, formatter(cell) { const run = cell.getRow().getData(); const wrap = el("div", "table-result"); wrap.append(el("span", run.window_complete ? "result-complete" : "", run.window_complete ? "Hoàn tất cửa sổ" : "Chưa xác nhận hoàn tất"), el("span", "", stabilityLabel(run.stability))); return wrap; }},
         {title: "Thao tác", width: 142, minWidth: 132, responsive: 0, headerSort: false, formatter(cell) {
           const run = cell.getRow().getData(); const wrap = el("div", "table-actions"); const inspect = el("button", "button button-outline audit-inspect", "Chi tiết"); inspect.type = "button"; inspect.setAttribute("aria-label", `Xem từng bài lượt #${run.id}`); inspect.addEventListener("click", () => action(inspect, () => showRun(run.id))); wrap.append(inspect);
-          if (run.window?.from && run.window?.to && !["queued", "running"].includes(run.status)) { const repeat = el("button", "button button-icon audit-repeat", "↻"); repeat.type = "button"; repeat.disabled = !window.RadarCollection.status || Boolean(window.RadarCollection.status.paused_code); repeat.setAttribute("aria-label", `Lặp lại cùng cửa sổ lượt #${run.id}`); repeat.title = "Lặp lại cùng cửa sổ"; repeat.addEventListener("click", () => action(repeat, () => repeatRun(run))); wrap.append(repeat); } return wrap;
+          if (run.window?.from && run.window?.to && !["queued", "running"].includes(run.status)) {
+            const label = run.can_continue ? "Quét tiếp" : "Lặp lại cùng cửa sổ";
+            const repeat = el("button", `button audit-repeat ${run.can_continue ? "button-outline" : "button-icon"}`, run.can_continue ? label : "↻");
+            repeat.type = "button";
+            repeat.disabled = !window.RadarCollection.status || Boolean(window.RadarCollection.status.paused_code);
+            repeat.setAttribute("aria-label", `${label} lượt #${run.id}`);
+            repeat.title = label;
+            repeat.addEventListener("click", () => action(repeat, () => repeatRun(run)));
+            wrap.append(repeat);
+          }
+          return wrap;
         }},
       ],
     });
@@ -201,6 +214,10 @@
       target.replaceChildren(); const run = data.run || {}; const header = el("div", "card-heading"); const heading = el("div"); heading.append(el("span", "section-kicker", "BẢN CHỤP DỮ LIỆU"), el("h2", "", `Chi tiết lượt #${id} · ${run.group_name || "Nhóm Facebook"}`)); header.append(heading);
       const close = el("button", "button button-outline", "Đóng chi tiết"); close.addEventListener("click", () => { target.hidden = true; state.selectedRun = null; }); header.append(close); target.append(header);
       const status = el("div", "run-detail-status"); status.append(statusBadge(run), el("span", "audit-source", run.source === "live" ? "Dữ liệu live" : run.source === "synthetic" ? "Dữ liệu synthetic" : "Chưa rõ nguồn"), el("span", "muted", duration(run))); target.append(status, el("p", "audit-window", windowText(data.window || run.window)));
+      const stopReason = (data.window || run.window)?.stop_reason;
+      if (run.continued_from) target.append(el("p", "audit-help", `Quét tiếp từ lượt #${run.continued_from}. Danh sách bên dưới gồm bài từ các phần đã thu thập.`));
+      if (stopReason === "timeout") target.append(el("p", "audit-help", run.can_continue ? "Đã hết thời gian thu thập. Chọn Quét tiếp trong bảng để đọc từ vị trí đã lưu." : "Đã hết thời gian thu thập."));
+      if (stopReason === "page_limit") target.append(el("p", "audit-help", "Lượt này đã chạm giới hạn số trang."));
       const numbers = el("div", "audit-counts"); numbers.append(metric("Dòng nguồn", count(run.raw_posts), "file-json-2", `${count(run.raw_duplicates)} trùng · ${count(run.raw_missing_ids)} thiếu ID`), metric("Bài trong cửa sổ", count(run.normalized_posts), "files", `${count(run.duplicates)} trùng · ${count(run.missing_ids)} thiếu ID`)); target.append(numbers, fieldMetrics(run), el("p", "audit-help", "Tỷ lệ trường có dữ liệu; chưa xác nhận nội dung đầy đủ hoặc toàn bộ album ảnh."), changes(run.stability), runChecks(Array.isArray(data.known_post_checks) ? data.known_post_checks : []));
       const diagnostic = data.diagnostics || {};
       if (diagnostic.raw_only_ids?.length) target.append(el("p", "audit-help", `ID có trong nguồn nhưng không vào tập chuẩn hóa: ${diagnostic.raw_only_ids.join(", ")}. Bài ngoài cửa sổ không được tính là bị bỏ sót.`));

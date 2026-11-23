@@ -102,13 +102,14 @@ class FacebookCrawler:
     posts. A page cap or timeout remains visible as an incomplete window.
     """
 
-    def __init__(self, lookback_hours=72, timeout=300, *, root=None,
+    def __init__(self, lookback_hours=72, timeout=300, *, save_checkpoints=False, root=None,
                  execute=None, resolve_group=None, load_env=None, now=None):
         if not math.isfinite(lookback_hours) or not 0 < lookback_hours <= 8760:
             raise ValueError("lookback_hours must be between 0 and 8760")
         if not math.isfinite(timeout) or not 1 <= timeout <= 3600:
             raise ValueError("timeout must be between 1 and 3600 seconds")
         self.lookback_hours, self.timeout = lookback_hours, timeout
+        self.save_checkpoints = save_checkpoints
         self.root = Path(root) if root is not None else phase0.ROOT
         self.execute = execute
         self.cancel_event = threading.Event()
@@ -185,9 +186,16 @@ class FacebookCrawler:
             collector_run_id = "facebook-crawl-" + uuid.uuid4().hex
             with tempfile.TemporaryDirectory(prefix="guitar-radar-") as temporary:
                 output = Path(temporary) / "output.json"
+                checkpoint_output = Path(temporary) / "checkpoint.json"
                 command = [str(binary), "--group", group, "--from", lower, "--to", upper,
-                           "--pages", "50", "--page-size", "20", "--timeout", str(self.timeout),
+                           "--pages", "0", "--page-size", "20", "--timeout", str(self.timeout),
                            "--run-id", collector_run_id, "--output", str(output)]
+                if self.save_checkpoints:
+                    command.extend(("--checkpoint-output", str(checkpoint_output)))
+                    if run.get("checkpoint") is not None:
+                        resume = Path(temporary) / "resume.json"
+                        write_json(resume, run["checkpoint"])
+                        command.extend(("--resume-from", str(resume)))
                 timed_out, returncode = False, 0
                 try:
                     result = (self.execute or self._execute)(command, cwd=self.root, check=False,
@@ -229,7 +237,19 @@ class FacebookCrawler:
                     raw["status"] = "partial" if raw["posts"] else "failed"
                     raw["errors"].append({"code": "network_error"})
                     raw["window"].update(complete=False, stop_reason="error")
-                return _sanitize(raw, _session_literals())
+                raw = _sanitize(raw, _session_literals())
+                if (self.save_checkpoints and not timed_out and not raw["errors"] and
+                        raw["window"].get("stop_reason") in {"timeout", "page_limit"} and
+                        checkpoint_output.is_file() and checkpoint_output.stat().st_size <= 4 * 1024 * 1024):
+                    try:
+                        checkpoint = json.loads(checkpoint_output.read_text(encoding="utf-8"))
+                        if (isinstance(checkpoint, dict) and checkpoint.get("group") == group and
+                                isinstance(checkpoint.get("cursor"), str) and checkpoint["cursor"] and
+                                _instant(checkpoint.get("from")) == start and _instant(checkpoint.get("to")) == end):
+                            raw["_checkpoint"] = checkpoint
+                    except (OSError, ValueError, TypeError):
+                        pass  # The acquired posts are usable even if the optional checkpoint is damaged.
+                return raw
         except CollectionFailure:
             raise
         except phase0.RunError as exc:

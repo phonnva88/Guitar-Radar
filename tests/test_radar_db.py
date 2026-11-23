@@ -73,6 +73,44 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(self.db.list_runs()[0]["error_code"], "network_error")
         self.assertEqual(self.db.get_group(group["id"])["last_error_code"], "network_error")
 
+    def test_continue_collection_preserves_scope_and_combines_observed_posts(self):
+        group = self.group()
+        bounds = {"from": "2026-11-07T00:00:00Z", "to": "2026-11-09T00:00:00Z"}
+        checkpoint = {**bounds, "cursor": "synthetic-private-cursor"}
+
+        def batch(number, complete):
+            post = self.post(number=number)
+            result = {
+                "group_id": "11", "collector": "facebook-go", "source": "live", "status": "success",
+                "window": {**bounds, "complete": complete, "scanned_posts": 1,
+                           "stop_reason": "feed_exhausted" if complete else "timeout"},
+                "pages_fetched": 1, "posts": [post], "errors": [],
+            }
+            return result, {**result, "posts": [{"id": number}]}
+
+        first = self.db.enqueue(group["id"], start=bounds["from"], end=bounds["to"])
+        self.db.claim_next()
+        normalized, raw = batch("101", False)
+        partial = self.db.complete_run(first["id"], normalized, raw=raw, checkpoint=checkpoint)
+        self.assertEqual(partial["status"], "partial")
+        details = run_details(self.db, first["id"])
+        self.assertTrue(details["run"]["can_continue"])
+        self.assertNotIn(checkpoint["cursor"], repr(details))
+
+        continued = self.db.enqueue(continue_from=first["id"])
+        self.assertEqual(continued["continued_from"], first["id"])
+        self.assertNotIn("checkpoint", continued)
+        self.assertEqual(self.db.claim_next()["checkpoint"], checkpoint)
+        normalized, raw = batch("102", True)
+        finished = self.db.complete_run(continued["id"], normalized, raw=raw)
+        self.assertEqual((finished["status"], finished["posts_count"]), ("success", 2))
+        continued_details = run_details(self.db, continued["id"])
+        self.assertTrue(continued_details["run"]["window_complete"])
+        self.assertEqual(continued_details["window"]["scanned_posts"], 2)
+        self.assertEqual([item["post_id"] for item in continued_details["posts"]], ["101", "102"])
+        self.assertEqual(self.db.feed()["total"], 2)
+        self.assertFalse(run_details(self.db, first["id"])["run"]["can_continue"])
+
     def test_partial_sparse_rows_preserve_known_fields_and_media(self):
         group = self.group()
         self.ingest(group, [self.post(images=["https://example.invalid/a.jpg"])])

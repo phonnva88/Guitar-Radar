@@ -139,13 +139,12 @@ func videoFromNode(node map[string]any, path string, shared, reel bool) videoCan
 	}
 	playback := ""
 	for _, key := range []string{"playable_url_quality_hd", "playable_url", "browser_native_hd_url", "browser_native_sd_url", "hd_src", "sd_src"} {
-		if source := firstMediaURL(node, key); source != "" {
-			parsed, _ := url.Parse(source)
-			if !nonVideoPath.MatchString(parsed.Path) {
-				playback = source
-				break
-			}
+		if playback = playbackMediaURL(node[key]); playback != "" {
+			break
 		}
+	}
+	if playback == "" {
+		playback = progressivePlaybackURL(node)
 	}
 	thumb := firstMediaURL(node, "thumbnail_url")
 	if thumb == "" {
@@ -186,6 +185,35 @@ func videoFromNode(node map[string]any, path string, shared, reel bool) videoCan
 		candidate.PlaybackURLExpiresAt = explicitExpiry(node)
 	}
 	return candidate
+}
+
+func progressivePlaybackURL(node map[string]any) string {
+	// In group feeds the typed Video can carry playback in the grid renderer's
+	// video details. Follow the delivery fields for this video only.
+	grid, _ := node["video_grid_renderer"].(map[string]any)
+	video, _ := grid["video"].(map[string]any)
+	fragment, _ := video["videoDeliveryResponseFragment"].(map[string]any)
+	delivery, _ := fragment["videoDeliveryResponseResult"].(map[string]any)
+	sources, _ := delivery["progressive_urls"].([]any)
+	for _, source := range sources {
+		entry, _ := source.(map[string]any)
+		if playable := playbackMediaURL(entry["progressive_url"]); playable != "" {
+			return playable
+		}
+	}
+	return ""
+}
+
+func playbackMediaURL(value any) string {
+	source := safeFBMediaURL(scalarString(value))
+	if source == "" {
+		return ""
+	}
+	parsed, _ := url.Parse(source)
+	if nonVideoPath.MatchString(parsed.Path) {
+		return ""
+	}
+	return source
 }
 
 func liveStatus(node map[string]any) bool {

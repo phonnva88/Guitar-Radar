@@ -91,6 +91,25 @@ func TestSharedStoryVideoWithShareStyle(t *testing.T) {
 	}
 }
 
+func TestGroupFeedVideoWithProgressiveDelivery(t *testing.T) {
+	const signed = "https://video.xx.fbcdn.net/feed.mp4?oe=F00&oh=fixture%2f%2B&_nc_test=1"
+	story := decodeStory(t, `{"attachments":[{"media":{
+		"__typename":"Video","id":"v25",
+		"video_grid_renderer":{"video":{"videoDeliveryResponseFragment":{"videoDeliveryResponseResult":{
+			"progressive_urls":[
+				{"progressive_url":"https://video.xx.fbcdn.net/rejected.mp4?access_token=synthetic"},
+				{"progressive_url":"https://video.xx.fbcdn.net/manifest.mpd"},
+				{"progressive_url":"`+signed+`","metadata":{"width":640}}
+			]
+		}}}}
+	}}]}`)
+	videos := extractVideos(story)
+	if len(videos) != 1 || videos[0].VideoID != "v25" ||
+		videos[0].PlaybackURL != signed || !videos[0].PlaybackURLEphemeral {
+		t.Fatalf("unexpected progressive playback metadata: %+v", videos)
+	}
+}
+
 func TestReelWrapperAndSignedPlayback(t *testing.T) {
 	const signed = "https://video.xx.fbcdn.net/reel.mp4?oe=F00&oh=fixture%2f%2B&_nc_test=1"
 	story := decodeStory(t, `{"post_id":"23","attachments":[

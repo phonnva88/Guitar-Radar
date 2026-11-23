@@ -4,6 +4,8 @@ Phase 1 có ứng dụng web riêng tư, PostgreSQL, worker thu thập tuần t�
 
 Ưu tiên mới là [giao diện kiểm chứng bộ cào](collector-verification.md). Module `facebook_crawler` tạo output đầu vào, module `data_filter` xử lý offline; worker nối hai module. Bản chụp collector đã loại bí mật và dữ liệu chuẩn hóa được lưu theo từng lượt để kiểm tra.
 
+Video trong bài được lưu dưới dạng [metadata riêng](video-support.md), tách khỏi gallery ảnh. Sau khi cập nhật, `setup` tự áp dụng migration và build lại `facebook-go`; bản ghi cũ vẫn đọc được. Để kiểm tra bài thật, chạy một lượt thu thập mới trên máy có session Facebook cục bộ.
+
 ```mermaid
 flowchart LR
   Owner[Trình duyệt của chủ ứng dụng] --> API[API và giao diện]
@@ -67,6 +69,8 @@ Cùng post ID/permalink được lưu đúng một nguồn bài. Bài từ các 
 
 API không hiển thị session và không bật CORS; thao tác ghi phải có header `X-Radar-Request: 1` từ giao diện. Database lưu bài, metadata ảnh và bản chụp output collector/normalized đã loại bí mật theo lượt; không lưu cookie, HTTP headers hay raw bootstrap. Ảnh được tải trực tiếp bởi trình duyệt từ URL nguồn, có thể hết hạn; link bài Facebook vẫn được giữ. Không tải về/rehost gallery.
 
+URL phát video, nếu Facebook cung cấp, cũng được tải trực tiếp bởi trình duyệt khi người dùng chọn phát. URL này có thể hết hạn, và bài vẫn có link gốc để mở trên Facebook. Không đăng file export, URL phát có chữ ký hoặc ảnh chụp dữ liệu nguồn lên nơi công khai.
+
 ## Sao lưu và khôi phục
 
 ```bash
@@ -94,6 +98,6 @@ Các test API và worker dùng mock, không gọi Facebook. Test database thực
 
 Kiểm thử luồng tạm dừng/tiếp tục của JavaScript bằng DOM giả lập (tùy chọn, cần Node): `npm install --prefix .cache/ui-tests --ignore-scripts --no-audit --no-fund jsdom@26.1.0`, rồi `node --test tests/collection_ui.test.cjs`. Test chỉ dùng phản hồi synthetic, không cần database hay Facebook.
 
-Kiểm thử trình duyệt tự động dùng `tests/phase1_browser_smoke.py`, cần `tests/requirements-browser.txt`, Chromium đã cài (`RADAR_CHROMIUM` nếu đường dẫn khác `/usr/bin/chromium`) và database thử riêng qua `RADAR_TEST_DATABASE_URL`. Script tự tạo/xóa schema, chỉ dùng bài synthetic, không gọi Facebook; ảnh chụp desktop/mobile lưu trong `reports/`.
+Kiểm thử trình duyệt tự động dùng `tests/phase1_browser_smoke.py`, cần `tests/requirements-browser.txt`, Chromium do Playwright cài (hoặc đường dẫn `RADAR_CHROMIUM`) và database thử riêng qua `RADAR_TEST_DATABASE_URL`. Script tự tạo/xóa schema, chỉ dùng bài và video synthetic, không gọi Facebook. Ảnh chụp desktop/mobile lưu trong `reports/`.
 
 Phase 1 không tự chuyển cookie của bạn lên Cloud và không cam kết luôn lấy đủ feed Facebook. Sau khi thử giao diện/collection trên WSL, đánh giá số lượng bài, các lượt partial và điều kiện vận hành trước khi mở rộng group/lịch chạy.

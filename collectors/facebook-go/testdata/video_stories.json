@@ -1,0 +1,150 @@
+{
+  "description": "Synthetic GraphQL story attachment shapes; these are not live Facebook responses.",
+  "cases": [
+    {
+      "name": "direct_video",
+      "story": {
+        "__typename": "Story",
+        "post_id": "2001",
+        "attachments": [{
+          "media": {
+            "__typename": "Video",
+            "id": "video-2001",
+            "preferred_thumbnail": {"image": {"uri": "https://scontent.xx.fbcdn.net/direct-thumb.jpg"}},
+            "playable_duration_in_ms": 93500,
+            "original_dimensions": {"width": 1920, "height": 1080},
+            "playable_url": "https://video.xx.fbcdn.net/direct.mp4",
+            "playable_url_expires_at": "2026-11-16T12:00:00Z"
+          }
+        }]
+      },
+      "kind": "direct",
+      "type": "video",
+      "video_count": 1,
+      "image_count": 0
+    },
+    {
+      "name": "reel_without_playback",
+      "story": {
+        "__typename": "Story",
+        "post_id": "2002",
+        "comet_sections": {"content": {"story": {"attachments": [{
+          "media": {
+            "__typename": "Reel",
+            "id": "reel-2002",
+            "image": {"uri": "https://scontent.xx.fbcdn.net/reel-thumb.jpg"},
+            "duration_seconds": 27
+          }
+        }]}}}
+      },
+      "kind": "reel",
+      "type": "reel",
+      "video_count": 1,
+      "image_count": 0
+    },
+    {
+      "name": "shared_video",
+      "story": {
+        "__typename": "Story",
+        "post_id": "2003",
+        "attached_story": {"attachments": [{
+          "media": {
+            "__typename": "Video",
+            "id": "video-shared-2003",
+            "thumbnail_image": {"uri": "https://scontent.xx.fbcdn.net/shared-thumb.jpg"}
+          }
+        }]}
+      },
+      "kind": "shared",
+      "type": "shared_video",
+      "video_count": 1,
+      "image_count": 0
+    },
+    {
+      "name": "livestream",
+      "story": {
+        "__typename": "Story",
+        "post_id": "2004",
+        "attachments": [{
+          "media": {
+            "__typename": "Video",
+            "id": "live-2004",
+            "is_live_streaming": true,
+            "image": {"uri": "https://scontent.xx.fbcdn.net/live-thumb.jpg"},
+            "playable_url": "https://video.xx.fbcdn.net/live.mp4"
+          }
+        }]
+      },
+      "kind": "live",
+      "type": "live_video",
+      "video_count": 1,
+      "image_count": 0
+    },
+    {
+      "name": "video_thumbnail_only",
+      "story": {
+        "__typename": "Story",
+        "post_id": "2005",
+        "attachments": [{
+          "media": {
+            "__typename": "Video",
+            "id": "video-2005",
+            "image": {"uri": "https://scontent.xx.fbcdn.net/only-thumb.jpg"}
+          }
+        }]
+      },
+      "kind": "direct",
+      "type": "video",
+      "video_count": 1,
+      "image_count": 0
+    },
+    {
+      "name": "external_link_thumbnail",
+      "story": {
+        "__typename": "Story",
+        "post_id": "2006",
+        "attachments": [{
+          "style_list": ["external"],
+          "media": {"__typename": "Video", "id": "external-2006", "image": {"uri": "https://scontent.xx.fbcdn.net/external-thumb.jpg"}}
+        }],
+        "link_preview": {"media": {"__typename": "Video", "id": "external-preview"}}
+      },
+      "type": "external_link_preview",
+      "video_count": 0,
+      "image_count": 0
+    },
+    {
+      "name": "mixed_photo_and_video",
+      "story": {
+        "__typename": "Story",
+        "post_id": "2007",
+        "attachments": [
+          {"media": {"__typename": "Photo", "id": "photo-2007", "image": {"uri": "https://scontent.xx.fbcdn.net/photo.jpg"}}},
+          {"media": {"__typename": "Video", "id": "video-2007", "image": {"uri": "https://scontent.xx.fbcdn.net/mixed-video-thumb.jpg"}}}
+        ]
+      },
+      "kind": "direct",
+      "type": "video",
+      "video_count": 1,
+      "image_count": 1
+    },
+    {
+      "name": "photo_only",
+      "story": {
+        "__typename": "Story",
+        "post_id": "2008",
+        "attachments": [{"media": {"__typename": "Photo", "id": "photo-2008", "image": {"uri": "https://scontent.xx.fbcdn.net/only-photo.jpg"}}}]
+      },
+      "type": "photo_post",
+      "video_count": 0,
+      "image_count": 1
+    },
+    {
+      "name": "text_only",
+      "story": {"__typename": "Story", "post_id": "2009", "message": {"text": "A synthetic text-only post."}},
+      "type": "unknown",
+      "video_count": 0,
+      "image_count": 0
+    }
+  ]
+}

@@ -12,6 +12,7 @@ try:
     import psycopg
     from psycopg.conninfo import make_conninfo
     from psycopg import sql
+    from radar.audit import run_details
     from radar.db import Database, Conflict, InvalidInput
 except ModuleNotFoundError:
     psycopg = None
@@ -59,6 +60,7 @@ class DatabaseTests(unittest.TestCase):
         group = self.group()
         self.ingest(group, [self.post(images=["https://example.invalid/a.jpg"])])
         original = self.db.feed()["items"][0]
+        self.assertEqual(original["videos"], [])
         self.ingest(group, [self.post(text="Updated caption for this specific guitar with original case and stand.", images=["https://example.invalid/b.jpg"])])
         current = self.db.feed()["items"][0]
         self.assertEqual(self.db.feed()["total"], 1)
@@ -83,6 +85,54 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(current[field], original[field], field)
         self.ingest(group, [self.post(images=[])])
         self.assertEqual(self.db.feed()["items"][0]["images"], [])  # Complete success can clear removed images.
+
+    def test_video_metadata_is_separate_from_images_and_expired_source_is_hidden(self):
+        group = self.group()
+        video = {"video_id": "v101", "kind": "direct", "thumbnail_url": "https://scontent.xx.fbcdn.net/thumb.jpg",
+                 "duration_seconds": 12.5, "width": 640, "height": 360,
+                 "playback_url": "https://video.xx.fbcdn.net/movie.mp4?oe=F00&oh=fixture%2f%2B",
+                 "playback_url_expires_at": "2099-01-01T00:00:00Z", "playback_url_ephemeral": True}
+        post = self.post(images=[])
+        post["videos"] = [video]
+        self.ingest(group, [post])
+        current = self.db.feed()["items"][0]
+        self.assertEqual(current["images"], [])
+        self.assertEqual(current["videos"], [video])
+        self.assertEqual(self.db.feed(has_images=False)["total"], 1)
+        self.assertEqual(self.db.feed(has_images=True)["total"], 0)
+        sparse = {"post_id": "101", "group_id": "11", "videos": [], "images": []}
+        self.ingest(group, [sparse], status="partial", errors=[{"code": "network_error"}])
+        self.assertEqual(self.db.feed()["items"][0]["videos"], [video])
+        expired = {**video, "playback_url_expires_at": "2020-01-01T00:00:00Z"}
+        post["videos"] = [expired]
+        self.ingest(group, [post])
+        self.assertIsNone(self.db.feed()["items"][0]["videos"][0]["playback_url"])
+        self.assertEqual(self.db.feed()["items"][0]["videos"][0]["kind"], "direct")
+        self.ingest(group, [self.post(images=[])])
+        current = self.db.feed()["items"][0]
+        self.assertEqual(current["videos"][0]["video_id"], "v101")
+        self.assertIsNone(current["videos"][0]["playback_url"])
+
+    def test_video_migration_keeps_existing_posts_photos_and_snapshots(self):
+        with self.db.connect() as conn:
+            conn.execute("DROP TABLE videos")
+            conn.execute("DELETE FROM radar_schema_version WHERE version=3")
+        try:
+            group = self.group()
+            photo = "https://example.invalid/legacy.jpg"
+            run = self.ingest(group, [self.post(images=[photo])])
+            with self.db.connect() as conn:
+                before = conn.execute("SELECT normalized FROM collector_run_snapshots WHERE run_id=%s", (run["id"],)).fetchone()
+        finally:
+            self.db.migrate()
+
+        self.db.migrate()
+        post = self.db.feed()["items"][0]
+        self.assertEqual((post["post_id"], post["images"], post["videos"]), ("101", [photo], []))
+        with self.db.connect() as conn:
+            after = conn.execute("SELECT normalized FROM collector_run_snapshots WHERE run_id=%s", (run["id"],)).fetchone()
+        self.assertEqual(before, after)
+        self.assertEqual(run_details(self.db, run["id"])["posts"][0]["videos"], [])
 
     def test_wrong_permalink_identity_rolls_back_the_entire_batch(self):
         group = self.group()

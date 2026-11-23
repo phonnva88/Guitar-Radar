@@ -90,6 +90,7 @@ def create_app(settings: Settings, database: Database | None = None) -> FastAPI:
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = ("default-src 'self'; script-src 'self'; style-src 'self'; "
                                                      "img-src 'self' https:; connect-src 'self'; "
+                                                     "media-src https://*.fbcdn.net; "
                                                      "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         return response
 

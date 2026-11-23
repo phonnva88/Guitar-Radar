@@ -9,6 +9,7 @@ import math
 import re
 from urllib.parse import quote, quote_plus, unquote_plus, urlsplit, urlunsplit
 
+from normalizer import video_media_url
 from normalizer.media import deduplicate_images, photo_identity
 
 _SENSITIVE = re.compile(r"cookie|authorization|password|passwd|access.?token|session|fb_dtsg|jazoest|csrf|credential|encrypt|api[-_]?key|(^|[-_])lsd($|[-_])|(^|_)xs($|_)|(^|_)c_user($|_)|(^|_)datr($|_)|(^|_)sb($|_)|(^|_)fr($|_)|secret|(^|[-_])token($|[-_])", re.I)
@@ -40,6 +41,8 @@ def sanitize(value, secrets=()):
             text = text.replace(secret, "[REDACTED]")
         text = re.sub(r"(?i)\bBearer\s+[^\s\"'<>]+", "Bearer [REDACTED]", text)
         text = re.sub(r"(?i)\b(xs|c_user|fb_dtsg|access_token|session_token|authorization|cookie)\s*[:=]\s*[^\s;,\"'<>]+", r"\1=[REDACTED]", text)
+        if video_media_url(text):
+            return text
         # URLs in scalar fields are sanitized without destroying useful CDN paths.
         try:
             parsed = urlsplit(text)

@@ -6,6 +6,8 @@ Dashboard dùng Bootstrap, Tabulator, PhotoSwipe và Lucide được lưu trong 
 
 Ứng dụng vẫn có feed, quản lý group, PostgreSQL và lịch tùy chọn. Hướng dẫn cài đặt: [Chạy Phase 1](docs/phase1-running.md).
 
+`facebook-go` đã có hỗ trợ nhận diện và lưu [metadata video trong bài Facebook](docs/video-support.md). Trình phát chỉ xuất hiện khi nguồn cung cấp URL phát hợp lệ; video không có URL phát vẫn có thumbnail/trạng thái và link bài gốc. Chưa tải video, chuyển mã hoặc tự phát.
+
 Trong WSL Ubuntu, với Docker Desktop/Compose đã chạy:
 
 ```bash

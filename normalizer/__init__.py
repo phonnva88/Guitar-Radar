@@ -9,13 +9,14 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote_plus, urlsplit
 
 from .media import deduplicate_images, photo_identity
 
 COLLECTORS = ("facebook-go", "fbgql")
 FACEBOOK_HOSTS = {"facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com", "mbasic.facebook.com", "fb.com", "www.fb.com"}
-POST_TYPES = {"normal_post", "shared_post", "anonymous_post", "announcement", "reel", "video", "photo_post", "marketplace_style_post", "suggested_post", "unknown"}
+POST_TYPES = {"normal_post", "shared_post", "anonymous_post", "announcement", "reel", "video", "shared_video",
+              "live_video", "external_link_preview", "photo_post", "marketplace_style_post", "suggested_post", "unknown"}
 
 
 def write_json(path: Path, value: object) -> None:
@@ -104,6 +105,104 @@ def web_url(value: object) -> str | None:
         return value
     except ValueError:
         return None
+
+
+VIDEO_KINDS = {"direct", "reel", "shared", "live"}
+_VIDEO_QUERY_SENSITIVE = re.compile(
+    r"token|cookie|authorization|passwd|password|credential|session|tracking|encrypt|csrf|fb_dtsg|jazoest|header|api[-_]key|secret", re.I
+)
+_VIDEO_QUERY_PRIVATE = {"xs", "c_user", "datr", "sb", "fr", "lsd", "request", "extensions"}
+_VIDEO_CDN_HOST = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+fbcdn\.net")
+_VIDEO_ID = re.compile(r"[A-Za-z0-9_+=:/-]{1,160}")
+_VIDEO_PATH = re.compile(r"(?:story|\$)(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\]){1,30}")
+
+
+def _video_evidence_path(value: object) -> bool:
+    return (isinstance(value, str) and len(value) <= 240 and _VIDEO_PATH.fullmatch(value) is not None and
+            not re.search(r"\.(?:link_preview|preview|thumbnail|external_link|profile|avatar|recommendations)(?:[.\[]|$)", value, re.I) and
+            re.search(r"\.(?:attachment|attachments|subattachments|all_subattachments|media|video)(?:[.\[]|$)", value) is not None)
+
+
+def video_media_url(value: object) -> str | None:
+    """Allow browser media only from Facebook's HTTPS media CDN."""
+    if not isinstance(value, str) or not value or value != value.strip() or any(
+        ord(char) < 33 or char in "#\\\"'<>\x7f" for char in value
+    ):
+        return None
+    try:
+        parsed = urlsplit(value)
+        host = (parsed.hostname or "").lower()
+        if (parsed.scheme != "https" or not _VIDEO_CDN_HOST.fullmatch(host) or parsed.netloc.lower() != host or
+                not parsed.path.startswith("/") or ";" in parsed.query or re.search(r"%(?![0-9a-fA-F]{2})", value)):
+            return None
+        for part in parsed.query.split("&"):
+            key = unquote_plus(part.partition("=")[0]).lower()
+            if key.startswith("__") or key in _VIDEO_QUERY_PRIVATE or _VIDEO_QUERY_SENSITIVE.search(key):
+                return None
+        if "[REDACTED]" in value:
+            return None
+        return value
+    except ValueError:
+        return None
+
+
+def video_metadata(candidate: object, *, source: bool = False) -> dict | None:
+    """Copy explicit video metadata; unsafe URLs never become browser sources."""
+    if not isinstance(candidate, dict) or not isinstance(candidate.get("kind"), str) or candidate["kind"] not in VIDEO_KINDS:
+        return None
+    value = candidate.get("video_id")
+    video_id = identity(value)
+    if video_id is not None and not _VIDEO_ID.fullmatch(video_id):
+        video_id = None
+    thumbnail = video_media_url(candidate.get("thumbnail_url"))
+    playback = video_media_url(candidate.get("playback_url"))
+    if playback and re.search(r"\.(?:jpe?g|png|gif|webp|avif|svg|mpd)$", unquote_plus(urlsplit(playback).path), re.I):
+        playback = None
+    duration = candidate.get("duration_seconds")
+    if type(duration) not in (int, float) or not 0 <= duration <= 100_000_000:
+        duration = None
+    dimensions = {}
+    for field in ("width", "height"):
+        size = candidate.get(field)
+        dimensions[field] = size if type(size) is int and 0 < size <= 100_000 else None
+    if source and not any((video_id, thumbnail, playback, duration is not None, *dimensions.values(),
+                           _video_evidence_path(candidate.get("path")))):
+        return None
+    expiry = timestamp(candidate.get("playback_url_expires_at")) if playback else None
+    return {"video_id": video_id, "kind": candidate["kind"], "thumbnail_url": thumbnail,
+            "duration_seconds": duration, **dimensions, "playback_url": playback,
+            "playback_url_expires_at": expiry,
+            "playback_url_ephemeral": bool(playback)}
+
+
+def validate_videos(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError("Videos must be an array")
+    result = []
+    for candidate in value:
+        video = video_metadata(candidate)
+        if video is None or any(key not in video or video[key] != val for key, val in candidate.items()):
+            raise ValueError("Invalid video metadata")
+        result.append(video)
+    return result
+
+
+def normalize_videos(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError("Video candidates must be an array")
+    output, seen = [], set()
+    for index, candidate in enumerate(value):
+        video = video_metadata(candidate, source=True)
+        if video is None:
+            continue
+        key = (("id", video["video_id"]) if video["video_id"] else
+               ("path", candidate["path"]) if _video_evidence_path(candidate.get("path")) else
+               ("candidate", index))
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(video)
+    return output
 
 
 def canonical_permalink(value: object, group_id: str | None = None) -> str | None:
@@ -238,13 +337,18 @@ def normalize_post(post: object, raw: dict) -> dict:
         author_id, author_name, images = None, None, []
     post_id, caption, url, posted_at = values
     validation = post_validation(post)
+    videos = normalize_videos(post.get("video_candidates", []))
     # An explicit candidate array was examined against the actual media layout.
     # Do not re-add rejected video thumbnails via the legacy URL fallback.
     if "image_candidates" in post:
         images = [candidate["url"] for candidate in validation["image_candidates"]]
+    elif videos:
+        # Older adapters could expose poster URLs alongside untyped attachments.
+        thumbnails = {video["thumbnail_url"] for video in videos if video["thumbnail_url"]}
+        images = [image for image in images if image not in thumbnails]
     result = {"collector": collector, "post_id": identity(post_id), "group_id": group,
             "group_name": None, "author_id": author_id, "author_name": author_name,
-            "text": text(caption), "url": web_url(url), "images": images,
+            "text": text(caption), "url": web_url(url), "images": images, "videos": videos,
             "posted_at": timestamp(posted_at), "collected_at": timestamp(raw.get("collected_at"))}
     if validation is not None:
         result["validation"] = validation
@@ -292,6 +396,7 @@ def normalize_run(raw: object, expected_collector: str | None = None) -> dict:
         "notes": ["Missing values are null or []; timestamps are UTC.",
                   "Field presence does not prove complete captions or galleries.",
                   "Legacy facebook-go attachments use image file extensions; explicit image candidates use raw GraphQL media evidence.",
+                  "Explicit video candidates are separate from photos; Facebook CDN playback URLs can expire.",
                   "Pinned fbgql Post model has no author; media evidence is captured separately from raw GraphQL.",
                   "Window filters are inclusive; undated posts remain in raw data and are excluded with diagnostics, not assumed outside the window."]}
     return normalized

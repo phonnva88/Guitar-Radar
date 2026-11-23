@@ -51,6 +51,12 @@
 
   function renderPost(post, compact = false) {
     const card = node("article", compact ? "duplicate-item" : "post-card");
+    const videos = Array.isArray(post.videos) ? post.videos : [];
+    if (videos.length && !compact) {
+      const list = node("div", "post-videos");
+      for (const video of videos) list.append(window.RadarVideo.create(video, post.url));
+      card.append(list);
+    }
     const images = Array.isArray(post.images) ? post.images.map(x => safeURL(typeof x === "string" ? x : x.url)).filter(Boolean) : [];
     if (images.length && !compact) {
       card.append(window.RadarGallery.create(post.images, {postId: post.post_id || post.id, compact: true}));
@@ -59,6 +65,9 @@
     const top = node("div", "post-topline"); top.append(node("span", "group-chip", post.group_name || "Nhóm Facebook"), node("time", "post-time", formatDate(post.posted_at))); body.append(top);
     if (post.author_name) body.append(node("div", "post-author", post.author_name));
     const content = post.text || "Bài đăng không có nội dung chữ."; const text = node("div", `post-text${post.text ? "" : " post-no-text"}`, content); body.append(text);
+    if (videos.length && compact) {
+      for (const video of videos) body.append(window.RadarVideo.create(video, post.url));
+    }
     if (content.length > 220 && !compact) { const toggle = node("button", "expand-text", "Xem thêm"); toggle.addEventListener("click", () => { const expanded = text.classList.toggle("expanded"); toggle.textContent = expanded ? "Thu gọn" : "Xem thêm"; toggle.setAttribute("aria-expanded", String(expanded)); }); toggle.setAttribute("aria-expanded", "false"); body.append(toggle); }
     const bottom = node("div", "post-bottom"); bottom.append(link("Xem bài gốc →", post.url));
     const sources = Array.isArray(post.sources) ? post.sources : [];
@@ -112,19 +121,29 @@
     if (end) params.set("end", new Date(`${end}T23:59:59.999+07:00`).toISOString());
     return params;
   }
-  async function loadFeed() {
-    const requestId = ++state.feedRequest; const target = $("feed-list"); loading(target); $("pagination").hidden = true;
+  async function loadFeed({background = false} = {}) {
+    const requestId = ++state.feedRequest; const target = $("feed-list");
+    const hasContent = state.feed !== null && target.childElementCount > 0;
+    if (!hasContent) { loading(target); $("pagination").hidden = true; }
     try {
       const params = feedParams();
       const filtered = ["q", "group_id", "has_images", "start", "end"].some(key => params.has(key));
       const [data, allPosts] = await Promise.all([api(`/api/posts?${params}`), filtered ? api("/api/posts?page=1&page_size=1") : Promise.resolve(null)]);
       if (requestId !== state.feedRequest) return;
+      const postsChanged = !state.feed || JSON.stringify(state.feed.items) !== JSON.stringify(data.items);
       state.feed = data; $("feed-summary").textContent = `${data.total || 0} mục phù hợp`;
       const total = allPosts?.total ?? data.total ?? 0;
       $("stat-posts").textContent = String(total); $("feed-count").textContent = String(total);
-      if (!data.items || !data.items.length) { empty(target, "Chưa có bài đăng phù hợp", "Thử thay đổi bộ lọc, hoặc thêm nhóm rồi thu thập lượt đầu tiên. Bài đăng sẽ xuất hiện tại đây."); return; }
-      target.replaceChildren(...data.items.map(post => renderPost(post))); const pages = Math.ceil(data.total / data.page_size); $("pagination").hidden = pages <= 1; $("page-label").textContent = `Trang ${data.page} / ${pages}`; $("previous-page").disabled = data.page <= 1; $("next-page").disabled = data.page >= pages;
-    } catch (e) { if (requestId !== state.feedRequest) return; $("feed-summary").textContent = ""; failed(target, e, loadFeed); }
+      if (!data.items || !data.items.length) { if (postsChanged || !hasContent) empty(target, "Chưa có bài đăng phù hợp", "Thử thay đổi bộ lọc, hoặc thêm nhóm rồi thu thập lượt đầu tiên. Bài đăng sẽ xuất hiện tại đây."); $("pagination").hidden = true; return; }
+      if (postsChanged || !hasContent) target.replaceChildren(...data.items.map(post => renderPost(post)));
+      const pages = Math.ceil(data.total / data.page_size); $("pagination").hidden = pages <= 1; $("page-label").textContent = `Trang ${data.page} / ${pages}`; $("previous-page").disabled = data.page <= 1; $("next-page").disabled = data.page >= pages;
+    } catch (e) {
+      if (requestId !== state.feedRequest || (background && hasContent)) return;
+      state.feed = null;
+      $("feed-summary").textContent = "";
+      $("pagination").hidden = true;
+      failed(target, e, loadFeed);
+    }
   }
   async function loadRuns() {
     const target = $("runs-list"); loading(target);
@@ -172,5 +191,5 @@
   $("next-page").addEventListener("click", () => { state.page++; loadFeed(); });
   $("group-form").addEventListener("submit", e => { e.preventDefault(); const button = e.currentTarget.querySelector("button"); action(button, async () => { await api("/api/groups", {method: "POST", body: JSON.stringify({name: $("group-name").value.trim(), url: $("group-url").value.trim()})}); $("group-form").reset(); notify("Đã thêm nhóm. Bạn có thể thu thập lượt đầu tiên ngay bên dưới."); await loadGroups(); }); });
   (async () => { const results = await Promise.allSettled([loadGroups(), loadStatus(), loadFeed()]); if (results.some(x => x.status === "rejected")) notify("Một phần trạng thái chưa tải được. Chọn Làm mới để thử lại.", true); })();
-  setInterval(() => { if (!document.hidden) { loadStatus().catch(() => {}); if (state.tab === "feed") { loadGroups().catch(() => {}); loadFeed(); } else if (state.tab === "runs") loadRuns(); } }, 30000);
+  setInterval(() => { if (!document.hidden) { loadStatus().catch(() => {}); if (state.tab === "feed") { loadGroups().catch(() => {}); loadFeed({background: true}); } else if (state.tab === "runs") loadRuns(); } }, 30000);
 })();

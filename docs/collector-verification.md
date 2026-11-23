@@ -2,6 +2,8 @@
 
 Ưu tiên hiện tại là kiểm chứng bộ cào Facebook. Bộ lọc nghiệp vụ guitar/giá chưa được bổ sung. Hai module mã nguồn có thể chạy độc lập, cùng được điều phối bởi ứng dụng:
 
+Metadata video trong bài và mức kiểm chứng hiện tại được ghi riêng trong [hướng dẫn video](video-support.md). Thumbnail video không tính vào gallery ảnh hoặc số ảnh đối chiếu; các lượt cũ không có metadata video vẫn hiển thị bình thường.
+
 ```mermaid
 flowchart LR
     FB[Facebook] --> C[facebook_crawler: thu thập]

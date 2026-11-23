@@ -73,6 +73,24 @@ class AuditTests(unittest.TestCase):
         self.assertNotIn("bootstrap_html", encoded)
         self.assertNotIn("headers", encoded)
         self.assertTrue(details["run"]["raw_snapshot_available"])
+        self.assertEqual(details["posts"][0]["videos"], [])  # Historical snapshots omit videos.
+
+    def test_video_snapshot_preserves_metadata_but_removes_secret_url_query(self):
+        envelope = self.envelope()
+        envelope["posts"][0]["videos"] = [{"video_id": "v101", "kind": "direct",
+                                            "thumbnail_url": "https://scontent.xx.fbcdn.net/thumb.jpg",
+                                            "duration_seconds": 12, "width": 640, "height": 360,
+                                            "playback_url": "https://video.xx.fbcdn.net/movie.mp4?access_token=SYNTHETIC_PRIVATE",
+                                            "playback_url_expires_at": "2027-01-01T00:00:00Z",
+                                            "playback_url_ephemeral": True}]
+        raw = {**envelope, "posts": [{"id": "101", "video_candidates": envelope["posts"][0]["videos"]}]}
+        run_id = self.store(envelope, raw)
+        details = run_details(self.db, run_id)
+        video = details["posts"][0]["videos"][0]
+        self.assertEqual(video["video_id"], "v101")
+        self.assertIsNone(video["playback_url"])
+        self.assertIsNone(details["posts"][0]["raw"]["video_candidates"][0]["playback_url"])
+        self.assertNotIn("SYNTHETIC_PRIVATE", json.dumps(details))
 
     def test_raw_and_normalized_identity_mismatch_is_rejected(self):
         envelope = self.envelope()

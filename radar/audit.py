@@ -6,7 +6,7 @@ returned every post or that every gallery/caption is complete.
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import re
 import unicodedata
@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from psycopg.types.json import Jsonb
 
-from normalizer import FACEBOOK_HOSTS, canonical_permalink, timestamp
+from normalizer import FACEBOOK_HOSTS, canonical_permalink, normalize_videos, timestamp, video_metadata
 from validation.media import sanitize
 
 FIELDS = ("text", "author", "url", "images", "posted_at")
@@ -48,7 +48,17 @@ def _clean(value):
     blocked = {"html", "bootstrap", "bootstrap_html", "response_body", "request_body"}
     def strip(item):
         if isinstance(item, dict):
-            return {str(k): strip(v) for k, v in item.items() if str(k).lower() not in blocked}
+            cleaned = {}
+            for key, value in item.items():
+                if str(key).lower() in blocked:
+                    continue
+                if key == "video_candidates":
+                    cleaned[key] = normalize_videos(value) if isinstance(value, list) else []
+                elif key == "videos":
+                    cleaned[key] = [video for candidate in value if (video := video_metadata(candidate)) is not None] if isinstance(value, list) else []
+                else:
+                    cleaned[str(key)] = strip(value)
+            return cleaned
         if isinstance(item, list):
             return [strip(v) for v in item]
         return item
@@ -274,7 +284,16 @@ def run_details(db, run_id):
     posts = []
     for post in envelope.get("posts", []):
         matching = raw_by_id.get(_post_id(post), [])
-        posts.append({**post, "raw": matching[0] if matching else None, "raw_matches_count": len(matching)})
+        videos = []
+        for candidate in post.get("videos", []):
+            video = video_metadata(candidate)
+            if video is not None:
+                expiry = _instant(video["playback_url_expires_at"])
+                if expiry is not None and expiry <= datetime.now(timezone.utc):
+                    video["playback_url"] = None
+                videos.append(video)
+        posts.append({**post, "videos": videos, "raw": matching[0] if matching else None,
+                      "raw_matches_count": len(matching)})
     raw_only = sorted(value for value in raw_by_id if value and value not in normalized_index)
     return {"run": summaries.get(run_id, _stats(row)), "posts": posts,
             "diagnostics": {"duplicate_ids": duplicate_ids, "missing_ids": missing, "raw_only_ids": raw_only,

@@ -249,6 +249,7 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 			}
 			enriched = sanitize(enriched, capture.Secrets).(map[string]any)
 			enriched["image_candidates"] = []imageCandidate{}
+			enriched["video_candidates"] = []videoCandidate{}
 			enriched["possible_type"] = "unknown"
 			enriched["type_evidence"] = []string{}
 			enriched["debug_response_saved"] = false
@@ -259,6 +260,7 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 			}
 			if evidence != nil {
 				enriched["image_candidates"] = evidence.Images
+				enriched["video_candidates"] = evidence.Videos
 				enriched["possible_type"] = evidence.PossibleType
 				enriched["type_evidence"] = evidence.TypeEvidence
 				if evidence.DebugFile != "" {

@@ -22,6 +22,9 @@ class DataFilterTests(unittest.TestCase):
     def raw(self):
         return json.loads((ROOT / "tests/fixtures/facebook-go.json").read_text())
 
+    def videos_raw(self):
+        return json.loads((ROOT / "tests/fixtures/video-posts.json").read_text())
+
     def test_processing_is_pure_deterministic_and_preserves_all_default_posts(self):
         raw = self.raw()
         before = deepcopy(raw)
@@ -72,6 +75,68 @@ class DataFilterTests(unittest.TestCase):
         bad["url"] = "https://www.facebook.com/groups/123456789/posts/other/"
         with self.assertRaises(FilterError):
             prepare_post(bad, "123456789")
+
+    def test_video_metadata_is_separate_from_photos_and_legacy_rows(self):
+        run = process_collection(self.videos_raw())
+        self.assertEqual([len(post["images"]) for post in run["posts"]], [0, 0, 0, 0, 0, 1, 0])
+        self.assertEqual([post["videos"][0]["kind"] if post["videos"] else None for post in run["posts"]],
+                         ["direct", "reel", "shared", "live", None, None, None])
+        self.assertEqual(run["posts"][0]["videos"][0]["duration_seconds"], 42.5)
+        self.assertEqual(run["posts"][0]["videos"][0]["playback_url"],
+                         "https://video.xx.fbcdn.net/direct.mp4?oe=F00&oh=fixture%2f%2B")
+        self.assertTrue(run["posts"][0]["videos"][0]["playback_url_ephemeral"])
+        self.assertIsNone(run["posts"][1]["videos"][0]["playback_url"])
+        self.assertEqual([post["validation"]["possible_type"] for post in run["posts"][2:5]],
+                         ["shared_video", "live_video", "external_link_preview"])
+        self.assertEqual(len(filter_collection(run, has_images=True)["posts"]), 1)
+        self.assertEqual(len(filter_collection(run, has_images=False)["posts"]), 6)
+        self.assertEqual(process_normalized(run)["posts"], run["posts"])
+        prepared = prepare_post(run["posts"][0], "987")
+        self.assertEqual(prepared["media"], [])
+        self.assertEqual(prepared["videos"][0]["video_id"], "v2101")
+        legacy = process_collection(self.raw())["posts"][0]
+        self.assertEqual(legacy["videos"], [])
+        legacy.pop("videos")
+        self.assertEqual(prepare_post(legacy, "123456789")["videos"], [])
+
+    def test_video_urls_are_vetted_without_discarding_detected_video(self):
+        raw = self.videos_raw()
+        raw["posts"][0]["video_candidates"][0]["playback_url"] = "https://outside.invalid/video.mp4"
+        raw["posts"][0]["video_candidates"][0]["thumbnail_url"] = "javascript:bad"
+        video = process_collection(raw)["posts"][0]["videos"][0]
+        self.assertEqual(video["kind"], "direct")
+        self.assertIsNone(video["thumbnail_url"])
+        self.assertIsNone(video["playback_url"])
+        self.assertFalse(video["playback_url_ephemeral"])
+        valid = process_collection(self.videos_raw())["posts"][0]
+        valid["videos"][0]["playback_url"] = "https://outside.invalid/video.mp4"
+        with self.assertRaises(FilterError):
+            prepare_post(valid, "987")
+        for unsafe in ("http://video.xx.fbcdn.net/movie.mp4",
+                       "https://name:password@video.xx.fbcdn.net/movie.mp4",
+                       "https://video.xx.fbcdn.net:443/movie.mp4",
+                       "https://www.facebook.com/groups/987/posts/2101/",
+                       "https://video.xx.fbcdn.net/movie.jpg",
+                       "https://video.xx.fbcdn.net/movie.mp4?access_token=SYNTHETIC",
+                       "https://video.xx.fbcdn.net/movie.mp4?oh=x;%61ccess_token=SYNTHETIC",
+                       "https://video.xx.fbcdn.net/movie.mp4?session=SYNTHETIC",
+                       "https://video.xx.fbcdn.net/movie.mp4\n"):
+            with self.subTest(unsafe=unsafe):
+                raw = self.videos_raw()
+                raw["posts"][0]["video_candidates"][0]["playback_url"] = unsafe
+                self.assertIsNone(process_collection(raw)["posts"][0]["videos"][0]["playback_url"])
+
+    def test_explicit_kind_only_attachment_is_kept_without_playback(self):
+        raw = self.videos_raw()
+        raw["posts"][0]["video_candidates"] = [
+            {"kind": "direct", "path": "story.attachments[0].media"},
+            {"kind": "direct", "path": "story.attachments[1].media"},
+            {"kind": "direct", "path": "story.link_preview.media"}]
+        post = process_collection(raw)["posts"][0]
+        self.assertEqual(len(post["videos"]), 2)
+        self.assertTrue(all(video["kind"] == "direct" and video["playback_url"] is None for video in post["videos"]))
+        self.assertEqual(len(prepare_post(post, "987")["videos"]), 2)
+        self.assertEqual(process_normalized(process_collection(raw))["posts"][0]["videos"], post["videos"])
 
     def test_fingerprint_and_filter_validation_match_existing_rules(self):
         self.assertIsNone(fingerprint("up"))

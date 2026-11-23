@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "collector": "facebook-go",
+  "source": "synthetic",
+  "group_id": "987",
+  "run_id": "synthetic-video-posts",
+  "started_at": "2026-11-07T12:00:00Z",
+  "collected_at": "2026-11-07T12:00:01Z",
+  "duration_ms": 1000,
+  "pages_fetched": 1,
+  "status": "success",
+  "errors": [],
+  "posts": [
+    {
+      "id": "2101", "groupId": "987", "message": "SYNTHETIC direct video", "createdAt": "2026-11-07T11:00:00Z",
+      "permalink": "https://www.facebook.com/groups/987/posts/2101/",
+      "attachments": ["https://scontent.xx.fbcdn.net/direct-thumb.jpg"], "image_candidates": [],
+      "possible_type": "video", "type_evidence": ["attachment.media.__typename=Video"],
+      "video_candidates": [{"video_id": "v2101", "kind": "direct", "thumbnail_url": "https://scontent.xx.fbcdn.net/direct-thumb.jpg", "duration_seconds": 42.5, "width": 1920, "height": 1080, "playback_url": "https://video.xx.fbcdn.net/direct.mp4?oe=F00&oh=fixture%2f%2B", "playback_url_expires_at": "2099-01-01T00:00:00Z", "playback_url_ephemeral": true, "path": "$.attachments[0].media"}]
+    },
+    {
+      "id": "2102", "groupId": "987", "message": "SYNTHETIC reel thumbnail", "createdAt": "2026-11-07T10:59:00Z",
+      "permalink": "https://www.facebook.com/groups/987/posts/2102/", "attachments": ["https://scontent.xx.fbcdn.net/reel-thumb.jpg"],
+      "image_candidates": [], "possible_type": "reel", "type_evidence": ["attachment.media.__typename=Reel"],
+      "video_candidates": [{"video_id": "v2102", "kind": "reel", "thumbnail_url": "https://scontent.xx.fbcdn.net/reel-thumb.jpg", "duration_seconds": 18, "width": 720, "height": 1280, "playback_url": null, "path": "$.attachments[0].media"}]
+    },
+    {
+      "id": "2103", "groupId": "987", "message": "SYNTHETIC shared video", "createdAt": "2026-11-07T10:58:00Z",
+      "permalink": "https://www.facebook.com/groups/987/posts/2103/", "attachments": [], "image_candidates": [],
+      "possible_type": "shared_video", "type_evidence": ["attachment.attached_story.media.__typename=Video"],
+      "video_candidates": [{"video_id": "v2103", "kind": "shared", "thumbnail_url": "https://scontent.xx.fbcdn.net/shared-thumb.jpg", "duration_seconds": null, "width": null, "height": null, "playback_url": null}]
+    },
+    {
+      "id": "2104", "groupId": "987", "message": "SYNTHETIC live video", "createdAt": "2026-11-07T10:57:00Z",
+      "permalink": "https://www.facebook.com/groups/987/posts/2104/", "attachments": [], "image_candidates": [],
+      "possible_type": "live_video", "type_evidence": ["attachment.media.is_live=true"],
+      "video_candidates": [{"video_id": "v2104", "kind": "live", "thumbnail_url": "https://scontent.xx.fbcdn.net/live-thumb.jpg", "duration_seconds": null, "width": 1280, "height": 720, "playback_url": null}]
+    },
+    {
+      "id": "2105", "groupId": "987", "message": "SYNTHETIC outside link preview", "createdAt": "2026-11-07T10:56:00Z",
+      "permalink": "https://www.facebook.com/groups/987/posts/2105/", "attachments": ["https://scontent.xx.fbcdn.net/link-thumb.jpg"], "image_candidates": [],
+      "possible_type": "external_link_preview", "type_evidence": ["attachment.media.__typename=ExternalUrl"]
+    },
+    {
+      "id": "2106", "groupId": "987", "message": "SYNTHETIC photo", "createdAt": "2026-11-07T10:55:00Z",
+      "permalink": "https://www.facebook.com/groups/987/posts/2106/", "attachments": [],
+      "image_candidates": [{"url": "https://scontent.xx.fbcdn.net/photo.jpg", "source": "attachment", "path": "$.attachments[0].media.image", "photo_id": "p2106", "width": 1000, "height": 700}]
+    },
+    {
+      "id": "2107", "groupId": "987", "message": "SYNTHETIC text only", "createdAt": "2026-11-07T10:54:00Z",
+      "permalink": "https://www.facebook.com/groups/987/posts/2107/", "attachments": []
+    }
+  ]
+}

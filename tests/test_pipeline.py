@@ -52,7 +52,7 @@ class NormalizerTests(unittest.TestCase):
         self.assertEqual(post["posted_at"], "2026-11-07T10:00:00Z")
         self.assertEqual(len(post["images"]), 1)
         self.assertIsNone(post["group_name"])
-        self.assertEqual(set(post), {"collector", "post_id", "group_id", "group_name", "author_id", "author_name", "text", "url", "images", "posted_at", "collected_at"})
+        self.assertEqual(set(post), {"collector", "post_id", "group_id", "group_name", "author_id", "author_name", "text", "url", "images", "videos", "posted_at", "collected_at"})
 
     def test_fbgql_does_not_invent_author_or_images(self):
         post = normalize_run(raw("fbgql", [gql_post()]))["posts"][0]

@@ -156,13 +156,20 @@
   }
   function postDetails(post, index) {
     const details = el("details", "audit-post"); const summary = el("summary"); const identity = el("div", "post-summary-identity");
-    identity.append(el("strong", "", `Bài ${post.post_id || `chưa có ID · dòng ${index + 1}`}`), el("span", "muted", `${post.author_name || "Chưa có tác giả"} · ${date(post.posted_at)}`)); summary.append(identity, el("span", "count-pill", `${Array.isArray(post.images) ? post.images.length : 0} ảnh`)); details.append(summary);
+    const videos = Array.isArray(post.videos) ? post.videos : [];
+    identity.append(el("strong", "", `Bài ${post.post_id || `chưa có ID · dòng ${index + 1}`}`), el("span", "muted", `${post.author_name || "Chưa có tác giả"} · ${date(post.posted_at)}`)); summary.append(identity, el("span", "count-pill", `${Array.isArray(post.images) ? post.images.length : 0} ảnh`)); if (videos.length) summary.append(el("span", "count-pill", `${videos.length} video`)); details.append(summary);
     details.addEventListener("toggle", () => {
       if (!details.open || details.dataset.loaded) return; details.dataset.loaded = "1";
       const body = el("div", "audit-post-body"); body.append(sourceLink("Mở bài Facebook →", post.url));
       const attributes = el("dl", "audit-attributes");
       for (const [name, value] of [["Post ID", post.post_id], ["Author ID", post.author_id], ["Tác giả", post.author_name], ["Giờ đăng (Việt Nam)", post.posted_at ? date(post.posted_at) : null]]) attributes.append(el("dt", "", name), el("dd", value ? "" : "audit-missing", value || "Chưa thu được"));
       body.append(attributes, el("h4", "", "Nội dung đã chuẩn hóa"), el("div", "audit-post-text", post.text || "Chưa thu được nội dung chữ."));
+      if (videos.length) {
+        body.append(el("h4", "", `Video đã nhận diện (${videos.length})`));
+        const list = el("div", "audit-videos");
+        for (const video of videos) list.append(window.RadarVideo.create(video, post.url));
+        body.append(list);
+      }
       const images = Array.isArray(post.images) ? post.images : []; body.append(el("h4", "", `Ảnh đã thu được (${images.length})`));
       if (images.length) body.append(window.RadarGallery.create(images, {postId: post.post_id}));
       else body.append(el("p", "audit-help", "Không có URL ảnh trong dữ liệu chuẩn hóa. Dùng bài đối chiếu để xác nhận kỳ vọng."));

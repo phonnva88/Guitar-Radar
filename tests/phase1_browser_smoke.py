@@ -1,7 +1,7 @@
 """Opt-in real PostgreSQL + Chromium smoke. All posts are synthetic; no Facebook calls.
 
 RADAR_TEST_DATABASE_URL=... .venv/bin/python tests/phase1_browser_smoke.py
-Requires playwright and an installed Chromium (RADAR_CHROMIUM or /usr/bin/chromium).
+Requires Playwright Chromium or a Chromium executable in RADAR_CHROMIUM.
 """
 import os
 from pathlib import Path
@@ -25,6 +25,33 @@ from radar.app import create_app
 from radar.config import Settings
 from radar.db import Database
 
+PLAYBACK_URL = "https://video.xx.fbcdn.net/synthetic.webm?oe=F00&oh=fixture%2f%2B"
+THUMBNAIL_URL = "https://scontent.xx.fbcdn.net/synthetic-video-thumb.svg"
+
+
+def synthetic_video(page):
+    return bytes(page.evaluate("""async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 48;
+        const drawing = canvas.getContext('2d');
+        const stream = canvas.captureStream(20);
+        const recorder = new MediaRecorder(stream, {mimeType: 'video/webm;codecs=vp8'});
+        const chunks = [];
+        recorder.ondataavailable = event => chunks.push(event.data);
+        const stopped = new Promise(resolve => { recorder.onstop = resolve; });
+        recorder.start();
+        for (let frame = 0; frame < 12; frame++) {
+            drawing.fillStyle = frame % 2 ? '#253d32' : '#d1b38b';
+            drawing.fillRect(0, 0, canvas.width, canvas.height);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        recorder.stop();
+        await stopped;
+        for (const track of stream.getTracks()) track.stop();
+        return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
+    }"""))
+
 
 def main():
     dsn = os.environ["RADAR_TEST_DATABASE_URL"]
@@ -45,8 +72,18 @@ def main():
                       "text": duplicate, "author_name": "Người bán demo", "posted_at": "2026-11-08T04:00:00Z",
                       "images": [f"https://images.example.invalid/guitar-{i}.svg" for i in range(1, 5)]}]
             if n == 101:
+                posts[0]["videos"] = [
+                    {"video_id": "synthetic-direct", "kind": "direct", "thumbnail_url": THUMBNAIL_URL,
+                     "playback_url": PLAYBACK_URL, "duration_seconds": 0.6},
+                    {"video_id": "synthetic-broken", "kind": "live", "thumbnail_url": THUMBNAIL_URL,
+                     "playback_url": "https://video.xx.fbcdn.net/broken.webm"},
+                ]
                 posts.append({"post_id": "10101", "group_id": "101", "url": "https://www.facebook.com/groups/101/posts/10101/",
-                              "text": "Tìm chỗ sửa guitar acoustic. Dữ liệu thử riêng tư.", "images": [], "posted_at": "2026-11-07T03:00:00Z"})
+                              "text": "Tìm chỗ sửa guitar acoustic. Dữ liệu thử riêng tư.", "images": [],
+                              "videos": [{"video_id": "synthetic-reel-1", "kind": "reel",
+                                          "thumbnail_url": THUMBNAIL_URL,
+                                          "duration_seconds": 83, "playback_url": None}],
+                              "posted_at": "2026-11-07T03:00:00Z"})
             envelope = {"schema_version": 1, "collector": "facebook-go", "run_id": f"browser-{n}",
                         "group_id": str(n), "source": "synthetic", "status": "success", "errors": [],
                         "window": {"from": "2026-11-06T00:00:00Z", "to": "2026-11-09T00:00:00Z", "complete": True, "stop_reason": "feed_exhausted"},
@@ -71,20 +108,28 @@ def main():
             time.sleep(0.05)
         assert server.started, "Server failed to start"
         with sync_playwright() as p:
-            browser = p.chromium.launch(executable_path=os.environ.get("RADAR_CHROMIUM", "/usr/bin/chromium"),
+            browser = p.chromium.launch(executable_path=os.environ.get("RADAR_CHROMIUM"),
                                         headless=True, args=["--no-sandbox"])
             context = browser.new_context(http_credentials={"username": settings.username, "password": settings.password},
                                           viewport={"width": 1440, "height": 1000})
+            # Deny every external request except the synthetic media routes below.
+            context.route("**/*", lambda route: route.continue_()
+                          if urlsplit(route.request.url).hostname == "127.0.0.1" else route.abort())
             context.route("https://images.example.invalid/**", lambda route: route.fulfill(
                 content_type="image/svg+xml", body='<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><rect width="800" height="450" fill="#d1b38b"/><text x="90" y="230" font-size="50" fill="#312d28">Guitar Radar · Demo</text></svg>'))
+            context.route("https://scontent.xx.fbcdn.net/**", lambda route: route.fulfill(
+                content_type="image/svg+xml", body='<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><rect width="800" height="450" fill="#253d32"/></svg>'))
             page = context.new_page()
+            clip = synthetic_video(page)
+            context.route("https://video.xx.fbcdn.net/**", lambda route: route.fulfill(
+                content_type="video/webm", body=clip if route.request.url == PLAYBACK_URL else b"invalid synthetic media"))
             errors = []
             console_errors = []
             remote_requests = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
             context.on("request", lambda request: remote_requests.append(request.url)
-                       if urlsplit(request.url).hostname not in {"127.0.0.1", "images.example.invalid"} else None)
+                       if urlsplit(request.url).hostname not in {"127.0.0.1", "images.example.invalid", "scontent.xx.fbcdn.net", "video.xx.fbcdn.net"} else None)
             page.goto(f"http://127.0.0.1:{port}")
             expect(page.locator("#panel-audit")).to_be_visible()
             rows = page.locator("#audit-runs .tabulator-row")
@@ -133,6 +178,18 @@ def main():
             expect(page.locator("#audit-run-details .audit-post-text").first).to_contain_text("Fender")
             gallery = page.locator("#audit-run-details .audit-post").first
             expect(gallery.locator(".gallery-open")).to_have_count(4)
+            player = gallery.locator(".radar-video-player")
+            expect(player).to_have_count(1)
+            expect(player).to_have_attribute("src", PLAYBACK_URL)
+            expect(player).to_have_attribute("poster", THUMBNAIL_URL)
+            assert player.evaluate("video => video.controls && !video.autoplay && video.paused")
+            player.evaluate("video => video.play()")
+            page.wait_for_function("document.querySelector('.audit-post video')?.currentTime > 0")
+            player.evaluate("video => video.pause()")
+            broken_video = gallery.get_by_role("region", name="Video phát trực tiếp")
+            expect(broken_video.locator(".radar-video-status")).to_contain_text("Không phát được video")
+            expect(broken_video.locator(".radar-video-original")).to_have_attribute(
+                "href", "https://www.facebook.com/groups/101/posts/10100/")
             gallery.locator(".gallery-open").first.click()
             expect(page.locator(".pswp")).to_be_visible()
             # PhotoSwipe binds keyboard controls after its opening animation.
@@ -143,6 +200,15 @@ def main():
             page.keyboard.press("Escape")
             expect(page.locator(".pswp")).to_have_count(0)
             expect(gallery.locator(".gallery-open").first).to_be_focused()
+            video_post = page.locator("#audit-run-details .audit-post").filter(has_text="Bài 10101")
+            video_post.locator("summary").first.click()
+            expect(video_post.locator("summary").first).to_contain_text("0 ảnh")
+            expect(video_post.locator("summary").first).to_contain_text("1 video")
+            expect(video_post.locator(".radar-video-thumbnail")).to_have_count(1)
+            expect(video_post.locator(".radar-video-duration")).to_have_text("1:23")
+            expect(video_post.locator(".radar-video-status")).to_contain_text("Chưa có URL phát")
+            expect(video_post.locator(".radar-video-player")).to_have_count(0)
+            expect(video_post.locator(".radar-video-original")).to_have_attribute("href", "https://www.facebook.com/groups/101/posts/10101/")
             page.locator("#audit-run-details .audit-raw").first.locator("summary").click()
             expect(page.locator("#audit-run-details .audit-raw pre").first).to_contain_text('"message"')
             ROOT.joinpath("reports").mkdir(exist_ok=True)
@@ -154,6 +220,7 @@ def main():
             assert repeat["status"] == "queued" and repeat["requested_from"].isoformat().startswith("2026-11-06")
             page.locator('[data-tab="feed"]').click()
             expect(page.locator("#feed-list .post-card")).to_have_count(3)
+            expect(page.locator("#feed-list .radar-video-status").filter(has_text="Chưa có URL phát")).to_be_visible()
             ROOT.joinpath("reports").mkdir(exist_ok=True)
             page.screenshot(path=str(ROOT / "reports/phase1-desktop.png"), full_page=True)
             page.locator("#search").fill("sửa guitar")
@@ -196,7 +263,7 @@ def main():
             assert not console_errors, console_errors
             assert not remote_requests, remote_requests
             browser.close()
-        print("PASS: real PostgreSQL, authenticated table sort/search/status, compatible/mismatched comparison, four-photo keyboard gallery, known-post/raw-details, repeat/feed/search/merge/mobile; no console/CSP errors or remote library requests; no Facebook requests")
+        print("PASS: PostgreSQL, audit comparison, photo gallery, synthetic video playback and fallbacks, feed/search/merge, mobile layout, and no external network requests")
     finally:
         if server:
             server.should_exit = True

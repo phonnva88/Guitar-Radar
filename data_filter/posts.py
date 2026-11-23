@@ -6,7 +6,7 @@ import re
 import unicodedata
 from urllib.parse import urlsplit, urlunsplit
 
-from normalizer import canonical_permalink, timestamp, web_url
+from normalizer import canonical_permalink, timestamp, validate_videos, web_url
 
 
 class FilterError(ValueError):
@@ -66,8 +66,13 @@ def prepare_post(item, group_id):
                       detail.get("width") if type(detail.get("width")) is int and detail["width"] > 0 else None,
                       detail.get("height") if type(detail.get("height")) is int and detail["height"] > 0 else None,
                       str(detail["source"])[:120] if detail.get("source") else None))
+    try:
+        videos = validate_videos(item.get("videos", []))
+    except ValueError as exc:
+        raise FilterError("Invalid video metadata") from exc
     text = item.get("text") if isinstance(item.get("text"), str) and item["text"].strip() else None
     return {"post_id": post_id, "url": url, "canonical_key": key, "text": text,
             "author_id": str(item["author_id"]) if item.get("author_id") is not None else None,
             "author_name": item.get("author_name") if isinstance(item.get("author_name"), str) else None,
-            "posted_at": posted_at, "fingerprint": fingerprint(text), "media": media}
+            "posted_at": posted_at, "fingerprint": fingerprint(text), "media": media,
+            "videos": videos}

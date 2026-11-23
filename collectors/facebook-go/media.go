@@ -31,9 +31,25 @@ type imageCandidate struct {
 	photoScope string
 }
 
+// A playable URL is only exported when a Video/Reel node explicitly contains
+// one. Facebook CDN URLs may expire and are never a post permalink.
+type videoCandidate struct {
+	VideoID              string   `json:"video_id,omitempty"`
+	Kind                 string   `json:"kind"`
+	ThumbnailURL         string   `json:"thumbnail_url,omitempty"`
+	DurationSeconds      *float64 `json:"duration_seconds,omitempty"`
+	Width                any      `json:"width,omitempty"`
+	Height               any      `json:"height,omitempty"`
+	PlaybackURL          string   `json:"playback_url,omitempty"`
+	PlaybackURLExpiresAt string   `json:"playback_url_expires_at,omitempty"`
+	PlaybackURLEphemeral bool     `json:"playback_url_ephemeral"`
+	Path                 string   `json:"path"`
+}
+
 type storyEvidence struct {
 	Story        map[string]any
 	Images       []imageCandidate
+	Videos       []videoCandidate
 	PossibleType string
 	TypeEvidence []string
 	DebugFile    string
@@ -276,14 +292,21 @@ func (c *rawCapture) add(story map[string]any) {
 		return
 	}
 	images := extractImages(clean)
-	possible, evidence := classifyStory(clean, images)
-	record := &storyEvidence{Story: clean, Images: images, PossibleType: possible, TypeEvidence: evidence}
+	// Inspect the original URL first: sanitizing a credential-dependent media
+	// URL by removing its query key could create a broken-looking playable URL.
+	videos := extractVideos(story)
+	for i := range videos {
+		videos[i] = sanitizeVideoCandidate(videos[i], c.Secrets)
+	}
+	possible, evidence := classifyStory(clean, images, videos)
+	record := &storyEvidence{Story: clean, Images: images, Videos: videos, PossibleType: possible, TypeEvidence: evidence}
 	previous := c.Stories[id]
 	if previous != nil {
 		record.Images = deduplicateImages(append(record.Images, previous.Images...))
-		if record.PossibleType == "unknown" && len(record.Images) > 0 {
-			record.PossibleType = "photo_post"
-			record.TypeEvidence = []string{"proven photo/image metadata in an earlier response"}
+		record.Videos = deduplicateVideos(append(record.Videos, previous.Videos...))
+		record.PossibleType, record.TypeEvidence = classifyStory(clean, record.Images, record.Videos)
+		if record.PossibleType == "unknown" && previous.PossibleType != "unknown" {
+			record.PossibleType, record.TypeEvidence = previous.PossibleType, previous.TypeEvidence
 		}
 	}
 	if c.DebugDir != "" && safePostFile.MatchString(id) {
@@ -300,7 +323,7 @@ func (c *rawCapture) add(story map[string]any) {
 			path = filepath.Join(c.DebugDir, fmt.Sprintf("%s.part-%d.json", id, part))
 		}
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			payload := map[string]any{"post_id": id, "collector": "facebook-go", "story": clean, "image_candidates": record.Images, "possible_type": record.PossibleType, "type_evidence": record.TypeEvidence}
+			payload := map[string]any{"post_id": id, "collector": "facebook-go", "story": clean, "image_candidates": record.Images, "video_candidates": record.Videos, "possible_type": record.PossibleType, "type_evidence": record.TypeEvidence}
 			if previous != nil && previous.DebugFile != "" {
 				payload["previous_debug_file"] = previous.DebugFile
 			}
@@ -326,7 +349,7 @@ func sensitiveKey(key string) bool {
 	if strings.HasPrefix(k, "__") && k != "__typename" {
 		return true
 	}
-	for _, part := range []string{"token", "cookie", "authorization", "password", "credential", "session", "tracking", "encrypted", "csrf", "fb_dtsg", "jazoest"} {
+	for _, part := range []string{"token", "cookie", "authorization", "passwd", "password", "credential", "session", "tracking", "encrypt", "csrf", "fb_dtsg", "jazoest", "header", "api_key", "api-key", "secret"} {
 		if strings.Contains(k, part) {
 			return true
 		}
@@ -341,12 +364,21 @@ func sensitiveKey(key string) bool {
 var credentialText = regexp.MustCompile(`(?i)(?:cookie|authorization|access_token|fb_dtsg|lsd|xs|c_user)\s*[:=]\s*[^\s;&"']+`)
 
 func cleanString(value string, secrets []string) string {
+	if safeFBMediaURL(value) != "" {
+		if containsMediaSecret(value, secrets) {
+			return ""
+		}
+		return value
+	}
 	for _, secret := range secrets {
 		if secret != "" {
 			value = strings.ReplaceAll(value, secret, "[REDACTED]")
 		}
 	}
 	if u, err := url.Parse(value); err == nil && (u.Scheme == "https" || u.Scheme == "http") {
+		if containsMediaSecret(value, secrets) && !strings.Contains(value, "[REDACTED]") {
+			return ""
+		}
 		u.User = nil
 		q := u.Query()
 		for key := range q {
@@ -399,16 +431,8 @@ func extractImages(story map[string]any) []imageCandidate {
 		switch v := value.(type) {
 		case map[string]any:
 			typ := strings.ToLower(scalarString(v["__typename"]))
-			if strings.Contains(typ, "video") || strings.Contains(typ, "reel") || strings.Contains(typ, "external") || strings.Contains(typ, "linkattachment") {
+			if strings.Contains(typ, "video") || strings.Contains(typ, "reel") || externalMedia(v) || attachmentStyle(v, "share") {
 				return
-			}
-			if styles, ok := v["style_list"].([]any); ok {
-				for _, style := range styles {
-					s := strings.ToLower(scalarString(style))
-					if strings.Contains(s, "external") || s == "share" || s == "link" {
-						return
-					}
-				}
 			}
 			photo = photo || typ == "photo" || typ == "image"
 			if typ == "photo" {
@@ -435,13 +459,19 @@ func extractImages(story map[string]any) []imageCandidate {
 				keys = append(keys, key)
 			}
 			sort.Strings(keys)
+			media, _ := v["media"].(map[string]any)
+			videoAttachment := explicitVideoType(strings.ToLower(scalarString(media["__typename"])))
 			for _, key := range keys {
 				lower := strings.ToLower(key)
-				if excludedMediaKeys[lower] || strings.Contains(lower, "actor_photo") || strings.Contains(lower, "actor_picture") || strings.Contains(lower, "profile") || strings.Contains(lower, "avatar") || strings.Contains(lower, "thumbnail") || strings.Contains(lower, "preview") {
+				if excludedMediaKeys[lower] || lower == "shared_story" || lower == "video" || lower == "reel" || lower == "short_form_video_context" || strings.Contains(lower, "actor_photo") || strings.Contains(lower, "actor_picture") || strings.Contains(lower, "profile") || strings.Contains(lower, "avatar") || strings.Contains(lower, "thumbnail") || strings.Contains(lower, "preview") || strings.Contains(lower, "poster") {
 					continue
 				}
 				inAttachment := attachment || lower == "attachments" || lower == "subattachments"
-				imageContext := photo || ((inAttachment || strings.Contains(path, ".media")) && (lower == "image" || lower == "images" || lower == "photo_image" || lower == "viewer_image" || lower == "photos"))
+				imageField := lower == "image" || lower == "images" || lower == "photo_image" || lower == "viewer_image" || lower == "photos"
+				if videoAttachment && imageField && lower != "photos" {
+					continue
+				}
+				imageContext := photo || ((inAttachment || strings.Contains(path, ".media")) && imageField)
 				walk(v[key], path+"."+key, inAttachment, imageContext, photoID, photoScope, depth+1)
 			}
 		case []any:
@@ -470,7 +500,12 @@ func dimension(v any) any {
 	return nil
 }
 
-func classifyStory(story map[string]any, images []imageCandidate) (string, []string) {
+func classifyStory(story map[string]any, images []imageCandidate, videos []videoCandidate) (string, []string) {
+	if len(videos) > 0 {
+		kind := videos[0].Kind
+		typ := map[string]string{"direct": "video", "reel": "reel", "shared": "shared_video", "live": "live_video"}[kind]
+		return typ, []string{"explicit video/reel media metadata at " + videos[0].Path}
+	}
 	for _, pair := range [][2]string{{"is_anonymous", "anonymous_post"}, {"is_anonymous_post", "anonymous_post"}, {"is_announcement", "announcement"}, {"is_suggested", "suggested_post"}} {
 		if story[pair[0]] == true {
 			return pair[1], []string{pair[0] + "=true"}
@@ -483,33 +518,34 @@ func classifyStory(story map[string]any, images []imageCandidate) (string, []str
 		return "photo_post", []string{"proven photo/image metadata"}
 	}
 	var detected string
-	var walk func(any, int)
-	walk = func(v any, depth int) {
+	var walk func(any, bool, int)
+	walk = func(v any, attachment bool, depth int) {
 		if depth > 24 || detected != "" {
 			return
 		}
 		switch obj := v.(type) {
 		case map[string]any:
+			if attachment && externalMedia(obj) {
+				detected = "external_link_preview"
+				return
+			}
 			typ := strings.ToLower(scalarString(obj["__typename"]))
-			if strings.Contains(typ, "reel") {
-				detected = "reel"
-			} else if typ == "video" {
-				detected = "video"
-			} else if strings.Contains(typ, "marketplace") {
+			if strings.Contains(typ, "marketplace") {
 				detected = "marketplace_style_post"
 			}
-			for k, c := range obj {
-				if !excludedMediaKeys[strings.ToLower(k)] {
-					walk(c, depth+1)
+			for _, key := range sortedKeys(obj) {
+				lower := strings.ToLower(key)
+				if !excludedMediaKeys[lower] {
+					walk(obj[key], attachment || lower == "attachment" || lower == "attachments", depth+1)
 				}
 			}
 		case []any:
 			for _, c := range obj {
-				walk(c, depth+1)
+				walk(c, attachment, depth+1)
 			}
 		}
 	}
-	walk(story, 0)
+	walk(story, false, 0)
 	if detected != "" {
 		return detected, []string{"explicit media typename"}
 	}

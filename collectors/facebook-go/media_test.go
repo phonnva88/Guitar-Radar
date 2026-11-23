@@ -139,7 +139,7 @@ func TestActualLibraryMediaCaptureAndInvalidCursor(t *testing.T) {
 	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		body := `"CurrentUserInitialData",[],{"USER_ID":"123","NAME":"Fixture"} "DTSGInitialData",[],{"token":"fixture"} "LSD",[],{"token":"fixture"} "client_revision":1,"haste_session":"fixture","hsi":"1","__spin_t":1`
 		if req.Method == http.MethodPost {
-			body = `{"data":{"group":{"id":"999","group_feed":{"edges":[{"node":{"__typename":"Story","id":"story","post_id":"10","message":{"text":"Fixture"},"creation_time":1794000000,"attachments":[{"media":{"__typename":"Photo","image":{"uri":"https://cdn.example/no-extension","width":42,"height":24}}}]}}],"page_info":{"has_next_page":true,"end_cursor":null}}}}}`
+			body = `{"data":{"group":{"id":"999","group_feed":{"edges":[{"node":{"__typename":"Story","id":"story","post_id":"10","message":{"text":"Fixture"},"creation_time":1794000000,"attachments":[{"media":{"__typename":"Photo","image":{"uri":"https://cdn.example/no-extension","width":42,"height":24}}},{"media":{"__typename":"Video","id":"video-10","image":{"uri":"https://scontent.xx.fbcdn.net/thumb.jpg"},"playable_url":"https://video.xx.fbcdn.net/video.mp4"}}]}}],"page_info":{"has_next_page":true,"end_cursor":null}}}}}`
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 	})
@@ -158,7 +158,12 @@ func TestActualLibraryMediaCaptureAndInvalidCursor(t *testing.T) {
 	}
 	var post map[string]any
 	json.Unmarshal(result.Posts[0], &post)
-	if len(post["image_candidates"].([]any)) != 1 || post["debug_response_saved"] != true {
+	if len(post["image_candidates"].([]any)) != 1 || len(post["video_candidates"].([]any)) != 1 || post["debug_response_saved"] != true {
+		t.Fatal(post)
+	}
+	video := post["video_candidates"].([]any)[0].(map[string]any)
+	if video["kind"] != "direct" || video["playback_url"] != "https://video.xx.fbcdn.net/video.mp4" ||
+		video["thumbnail_url"] != "https://scontent.xx.fbcdn.net/thumb.jpg" || post["possible_type"] != "video" {
 		t.Fatal(post)
 	}
 }

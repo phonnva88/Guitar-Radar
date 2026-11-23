@@ -6,7 +6,7 @@ one transaction, including run health and pause state; no cookie/raw payload is 
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 from urllib.parse import urlsplit, urlunsplit
@@ -14,7 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 import psycopg
 from psycopg.rows import dict_row
 
-from normalizer import FACEBOOK_HOSTS
+from normalizer import FACEBOOK_HOSTS, timestamp, video_media_url
 from data_filter import FilterError, prepare_post, fingerprint, normalize_filters
 
 
@@ -213,6 +213,16 @@ class Database:
                         conn.execute("DELETE FROM media WHERE post_id=%s", (stored_id,))
                         for media in post["media"]:
                             conn.execute("INSERT INTO media(post_id,url,position,width,height,type_evidence) VALUES(%s,%s,%s,%s,%s,%s)", (stored_id, *media))
+                    if post["videos"]:
+                        conn.execute("DELETE FROM videos WHERE post_id=%s", (stored_id,))
+                        for position, video in enumerate(post["videos"]):
+                            conn.execute("""INSERT INTO videos
+                                            (post_id,position,video_id,kind,thumbnail_url,duration_seconds,width,height,
+                                             playback_url,playback_url_expires_at,playback_url_ephemeral)
+                                            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                                         (stored_id, position, video["video_id"], video["kind"], video["thumbnail_url"],
+                                          video["duration_seconds"], video["width"], video["height"], video["playback_url"],
+                                          video["playback_url_expires_at"], video["playback_url_ephemeral"]))
                 from radar.audit import capture_run
                 capture_run(conn, run, envelope, raw=raw)
                 conn.execute("UPDATE monitored_groups SET last_error_code=%s,last_success_at=CASE WHEN %s='success' THEN now() ELSE last_success_at END WHERE id=%s", (code, status, group["id"]))
@@ -308,6 +318,21 @@ class Database:
     def _decorate(self, conn, rows):
         for row in rows:
             row["images"] = [x["url"] for x in conn.execute("SELECT url FROM media WHERE post_id=%s ORDER BY position", (row["id"],)).fetchall()]
+            videos = conn.execute("""SELECT video_id,kind,thumbnail_url,duration_seconds,width,height,playback_url,
+                                   playback_url_expires_at,playback_url_ephemeral
+                                   FROM videos WHERE post_id=%s ORDER BY position""", (row["id"],)).fetchall()
+            row["videos"] = []
+            for video in videos:
+                expiry = video["playback_url_expires_at"]
+                playable = video_media_url(video["playback_url"])
+                if expiry is not None and expiry <= datetime.now(timezone.utc):
+                    playable = None
+                row["videos"].append({"video_id": video["video_id"], "kind": video["kind"],
+                                      "thumbnail_url": video_media_url(video["thumbnail_url"]),
+                                      "duration_seconds": video["duration_seconds"], "width": video["width"],
+                                      "height": video["height"], "playback_url": playable,
+                                      "playback_url_expires_at": timestamp(expiry.isoformat()) if expiry else None,
+                                      "playback_url_ephemeral": video["playback_url_ephemeral"]})
             row["sources"] = conn.execute("SELECT p.id,p.post_id,p.url,g.name AS group_name FROM posts p JOIN monitored_groups g ON g.id=p.group_id WHERE p.listing_id=%s ORDER BY p.id", (row["listing_id"],)).fetchall()
         return rows
 

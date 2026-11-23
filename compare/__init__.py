@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from normalizer import canonical_permalink, identity, text, timestamp, validate_envelope, web_url, window_datetimes, window_metadata
+from normalizer import canonical_permalink, identity, text, timestamp, validate_envelope, validate_videos, web_url, window_datetimes, window_metadata
 
 FIELDS = ("text", "author", "url", "images", "posted_at")
 SETTINGS = ("requested_pages", "page_size", "sort")
@@ -33,6 +33,7 @@ def validate_normalized(run: object, collector: str) -> dict:
                 raise ValueError("Invalid normalized scalar field")
         if not isinstance(post.get("images"), list) or any(not web_url(image) for image in post["images"]):
             raise ValueError("Invalid normalized images")
+        validate_videos(post.get("videos", []))
         if bounds:
             when = timestamp(post.get("posted_at"))
             if when is None:

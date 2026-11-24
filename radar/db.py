@@ -228,7 +228,12 @@ class Database:
                         stored_id = conn.execute("""INSERT INTO posts(listing_id,group_id,post_id,canonical_key,url,text,author_id,author_name,posted_at,text_fingerprint,source)
                                                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                                                  (listing, group["id"], post["post_id"], post["canonical_key"], post["url"], post["text"], post["author_id"], post["author_name"], post["posted_at"], post["fingerprint"], source)).fetchone()["id"]
-                    if not existing or status == "success" or post["media"]:
+                    replace_media = not existing or status == "success" or bool(post["media"])
+                    if existing and replace_media and not post["album_photos_complete"]:
+                        saved_photos = conn.execute("SELECT count(*) AS count FROM media WHERE post_id=%s",
+                                                    (stored_id,)).fetchone()["count"]
+                        replace_media = len(post["media"]) >= saved_photos
+                    if replace_media:
                         conn.execute("DELETE FROM media WHERE post_id=%s", (stored_id,))
                         for media in post["media"]:
                             conn.execute("INSERT INTO media(post_id,url,position,width,height,type_evidence) VALUES(%s,%s,%s,%s,%s,%s)", (stored_id, *media))

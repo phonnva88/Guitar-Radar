@@ -49,6 +49,7 @@ type videoCandidate struct {
 type storyEvidence struct {
 	Story        map[string]any
 	Images       []imageCandidate
+	Album        albumPreview
 	Videos       []videoCandidate
 	PossibleType string
 	TypeEvidence []string
@@ -64,11 +65,13 @@ type rawCapture struct {
 	InvalidCursor  bool
 	FeedSeen       bool
 	PageInfoSeen   bool
+	ReadAlbum      func(context.Context, string, albumPreview, []string) (albumResult, error)
 }
 
 type captureTransport struct {
-	Base    http.RoundTripper
-	Capture *rawCapture
+	Base         http.RoundTripper
+	Capture      *rawCapture
+	albumHeaders http.Header
 }
 
 func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -79,6 +82,11 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	resp, err := base.RoundTrip(req)
 	if err != nil || resp == nil || resp.Body == nil {
 		return resp, err
+	}
+	if resp.StatusCode == http.StatusOK && req.Method == http.MethodGet &&
+		req.URL.Scheme == "https" && req.URL.Host == "www.facebook.com" &&
+		strings.TrimRight(req.URL.Path, "/") == "/groups/feed" {
+		t.albumHeaders = req.Header.Clone()
 	}
 	if req.Method != http.MethodPost || strings.TrimRight(req.URL.Path, "/") != "/api/graphql" {
 		return resp, nil
@@ -299,10 +307,13 @@ func (c *rawCapture) add(story map[string]any) {
 		videos[i] = sanitizeVideoCandidate(videos[i], c.Secrets)
 	}
 	possible, evidence := classifyStory(clean, images, videos)
-	record := &storyEvidence{Story: clean, Images: images, Videos: videos, PossibleType: possible, TypeEvidence: evidence}
+	record := &storyEvidence{Story: clean, Images: images, Album: incompleteAlbum(clean), Videos: videos, PossibleType: possible, TypeEvidence: evidence}
 	previous := c.Stories[id]
 	if previous != nil {
 		record.Images = deduplicateImages(append(record.Images, previous.Images...))
+		if record.Album.count == 0 {
+			record.Album = previous.Album
+		}
 		record.Videos = deduplicateVideos(append(record.Videos, previous.Videos...))
 		record.PossibleType, record.TypeEvidence = classifyStory(clean, record.Images, record.Videos)
 		if record.PossibleType == "unknown" && previous.PossibleType != "unknown" {

@@ -352,6 +352,8 @@ def normalize_post(post: object, raw: dict) -> dict:
             "posted_at": timestamp(posted_at), "collected_at": timestamp(raw.get("collected_at"))}
     if validation is not None:
         result["validation"] = validation
+    if type(post.get("album_photos_complete")) is bool:
+        result["album_photos_complete"] = post["album_photos_complete"]
     return result
 
 

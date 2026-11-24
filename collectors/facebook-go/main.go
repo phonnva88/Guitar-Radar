@@ -165,7 +165,9 @@ func newClient(ctx context.Context, cookies groups.Cookies) (groupClient, error)
 	// Upstream disables automatic redirects and checks manual bootstrap redirects.
 	var transport http.RoundTripper = http.DefaultTransport
 	if capture, ok := ctx.Value(captureKey{}).(*rawCapture); ok {
-		transport = &captureTransport{Base: transport, Capture: capture}
+		tapped := &captureTransport{Base: transport, Capture: capture}
+		capture.ReadAlbum = tapped.readAlbum
+		transport = tapped
 	}
 	return groups.NewContext(ctx, cookies,
 		groups.WithHTTPClient(&http.Client{Timeout: 30 * time.Second, Transport: transport}),
@@ -201,6 +203,7 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 	cursor := ""
 	seenCursors := map[string]bool{}
 	seenPosts := map[string]bool{}
+	albums := map[string]albumResult{}
 	var previousTime time.Time
 	unordered := false
 	if cfg.Resume != nil {
@@ -234,6 +237,7 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 			result.Errors = append(result.Errors, collectorError{Code: "parse_error", Stage: "raw_story_count", Message: "upstream parser omitted one or more story nodes", Page: pageNo})
 		}
 		accepted := 0
+		var albumStop error
 		allOlder := len(page.Posts) > 0
 		for i, post := range page.Posts {
 			// Isolate serialization failures to one post; preserve all other posts.
@@ -278,7 +282,20 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 				evidence = capture.Stories[post.StoryID]
 			}
 			if evidence != nil {
-				enriched["image_candidates"] = evidence.Images
+				images := evidence.Images
+				// The feed also contains posts outside the requested time range.
+				// Only expand albums that the caller will actually ingest.
+				inWindow := result.Window == nil || (!post.CreatedAt.Before(cfg.From) && !post.CreatedAt.After(cfg.To))
+				if preview := evidence.Album; preview.count > 0 {
+					album, alreadyRead := albums[post.ID]
+					if !alreadyRead && inWindow && albumStop == nil && ctx.Err() == nil && capture.ReadAlbum != nil {
+						album, albumStop = capture.ReadAlbum(ctx, post.ID, preview, capture.Secrets)
+						albums[post.ID] = album
+					}
+					images = deduplicateImages(append(append([]imageCandidate{}, images...), album.images...))
+					enriched["album_photos_complete"] = album.complete
+				}
+				enriched["image_candidates"] = images
 				enriched["video_candidates"] = evidence.Videos
 				enriched["possible_type"] = evidence.PossibleType
 				enriched["type_evidence"] = evidence.TypeEvidence
@@ -292,6 +309,10 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 			accepted++
 		}
 		fmt.Fprintf(log, "[facebook-go] page=%d posts=%d\n", pageNo, accepted)
+		if albumStop != nil {
+			result.Errors = append(result.Errors, classify(albumStop, "album", pageNo))
+			break
+		}
 		if result.Window != nil && capture.FeedSeen && !capture.PageInfoSeen {
 			result.Errors = append(result.Errors, collectorError{Code: "invalid_cursor", Stage: "pagination", Message: "group feed omitted pagination metadata; exhaustion cannot be established", Page: pageNo})
 			result.Window.StopReason = "invalid_cursor"

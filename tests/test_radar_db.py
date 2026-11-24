@@ -124,6 +124,16 @@ class DatabaseTests(unittest.TestCase):
         self.ingest(group, [self.post(images=[])])
         self.assertEqual(self.db.feed()["items"][0]["images"], [])  # Complete success can clear removed images.
 
+    def test_incomplete_album_does_not_replace_existing_larger_gallery(self):
+        group = self.group()
+        images = ["https://example.invalid/a.jpg", "https://example.invalid/b.jpg"]
+        self.ingest(group, [self.post(images=images)])
+        preview = {**self.post(images=images[:1]), "album_photos_complete": False}
+        self.ingest(group, [preview])
+        self.assertEqual(self.db.feed()["items"][0]["images"], images)
+        self.ingest(group, [{**preview, "album_photos_complete": True}])
+        self.assertEqual(self.db.feed()["items"][0]["images"], images[:1])
+
     def test_video_metadata_is_separate_from_images_and_expired_source_is_hidden(self):
         group = self.group()
         video = {"video_id": "v101", "kind": "direct", "thumbnail_url": "https://scontent.xx.fbcdn.net/thumb.jpg",

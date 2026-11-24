@@ -111,13 +111,14 @@
     viewer.init();
   }
   function create(images, {postId, compact = false} = {}) {
-    const gallery = node("div", `radar-gallery${compact ? " gallery-compact" : ""}`);
     const records = (Array.isArray(images) ? images : []).map(value => {
       const data = typeof value === "string" ? {url: value} : value;
       const url = safeURL(data?.url);
       if (!url) return null;
       return {url, width: dimension(data.width), height: dimension(data.height)};
     }).filter(Boolean);
+    const multi = records.length > 1;
+    const gallery = node("div", `radar-gallery${compact ? " gallery-compact" : ""}${compact && multi ? ` gallery-multi gallery-size-${Math.min(records.length, 4)}` : ""}`);
     if (!records.length) { gallery.append(node("p", "gallery-error", "Chưa có ảnh hợp lệ để hiển thị.")); return gallery; }
     gallery.setAttribute("aria-label", `Bộ ảnh${postId ? ` bài ${postId}` : ""}: ${records.length} ảnh`);
     const status = node("p", "gallery-status"); status.setAttribute("role", "status"); status.hidden = true;
@@ -132,7 +133,6 @@
     };
     records.forEach((record, index) => {
       record.alt = `Ảnh ${index + 1} / ${records.length}${postId ? ` của bài ${postId}` : ""}`;
-      if (compact && index > 0) return;
       const tile = node("figure", "gallery-tile");
       const button = node("button", "gallery-open"); button.type = "button";
       button.setAttribute("aria-label", `Mở ${record.alt.toLowerCase()}`);
@@ -144,14 +144,26 @@
       image.src = record.url;
       button.append(image, node("span", "gallery-position", `${index + 1} / ${records.length}`));
       button.addEventListener("click", () => open(index, button));
-      const caption = node("figcaption", "gallery-caption");
-      if (compact) {
-        const all = node("button", "gallery-view-all", `Xem ${records.length} ảnh`); all.type = "button";
-        all.addEventListener("click", () => open(0, all)); caption.append(all);
-      } else caption.append(node("span", "", `Ảnh ${index + 1}`));
-      caption.append(sourceLink(record.url));
-      tile.append(button, caption, error); gallery.append(tile);
+      tile.append(button);
+      if (!compact || !multi) {
+        const caption = node("figcaption", "gallery-caption");
+        if (compact) {
+          const all = node("button", "gallery-view-all", `Xem ${records.length} ảnh`); all.type = "button";
+          all.addEventListener("click", () => open(0, all)); caption.append(all);
+        } else caption.append(node("span", "", `Ảnh ${index + 1}`));
+        caption.append(sourceLink(record.url));
+        tile.append(caption);
+      }
+      tile.append(error); gallery.append(tile);
     });
+    if (compact && multi) {
+      const footer = node("div", "gallery-compact-footer");
+      footer.append(node("span", "gallery-count", `${records.length} ảnh`));
+      const all = node("button", "gallery-view-all", `Xem tất cả ${records.length} ảnh`); all.type = "button";
+      all.addEventListener("click", () => open(0, all));
+      footer.append(all);
+      gallery.append(footer);
+    }
     gallery.append(status);
     return gallery;
   }

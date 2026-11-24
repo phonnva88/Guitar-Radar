@@ -220,6 +220,10 @@ def main():
             assert repeat["status"] == "queued" and repeat["requested_from"].isoformat().startswith("2026-11-06")
             page.locator('[data-tab="feed"]').click()
             expect(page.locator("#feed-list .post-card")).to_have_count(3)
+            # Two posts have four photos each; the feed preview must render every
+            # photo, not only the first one.
+            expect(page.locator("#feed-list .gallery-open")).to_have_count(8)
+            expect(page.locator("#feed-list .gallery-compact-footer")).to_have_count(2)
             expect(page.locator("#feed-list .radar-video-status").filter(has_text="Chưa có URL phát")).to_be_visible()
             ROOT.joinpath("reports").mkdir(exist_ok=True)
             page.screenshot(path=str(ROOT / "reports/phase1-desktop.png"), full_page=True)

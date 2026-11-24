@@ -1,6 +1,7 @@
 import base64
 import unittest
 from unittest.mock import MagicMock
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 from radar.app import create_app
@@ -72,6 +73,21 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/duplicates/confirm", headers=self.auth,
                          json={"post_ids": [1, 1]}).status_code, 422)
         self.db.confirm_duplicate.assert_not_called()
+
+    def test_engagement_writes_require_owner_intent_and_validate_reaction(self):
+        settings = Settings("postgresql://unused", "owner", "SYNTHETIC-test-password", allowed_hosts=("testserver",))
+        service = MagicMock()
+        service.write.return_value = {"state": "confirmed", "reaction": "LOVE"}
+        client = TestClient(create_app(settings, self.db, engagement=service))
+        path = "/api/posts/1/reaction"
+        identifier = "b345ad52-19b6-4486-8a8d-bc6d02637a70"
+        payload = {"account_id": "100", "action_id": identifier, "reaction": "LOVE"}
+        self.assertEqual(client.post(path, json=payload).status_code, 401)
+        self.assertEqual(client.post(path, headers={"Authorization": self.auth["Authorization"]}, json=payload).status_code, 403)
+        self.assertEqual(client.post(path, headers=self.auth, json={**payload, "reaction": "unknown"}).status_code, 422)
+        service.write.assert_not_called()
+        self.assertEqual(client.post(path, headers=self.auth, json=payload).json()["state"], "confirmed")
+        service.write.assert_called_once_with(1, "100", UUID(identifier), "reaction", reaction="LOVE")
 
 
 if __name__ == "__main__":

@@ -213,3 +213,17 @@ Không khẳng định `vegmpremium` public hay account đã join khi chưa xác
 - Feed live thay đổi giữa hai collector tuần tự; số trang bằng nhau chưa chắc cùng khoảng thời gian/số post. Chỉ báo khác biệt trong mẫu quan sát, không tự chọn collector tốt nhất.
 
 Các lệnh POC phía trên chỉ tạo dữ liệu/report. Ứng dụng Phase 1 dùng lệnh riêng ở đầu README; xem [phạm vi Phase 1](docs/phase1-scope.md).
+
+## Bình luận và cảm xúc trên Facebook
+
+Bản tin hiển thị tổng số bình luận và cảm xúc khi bộ cào đọc được số liệu rõ ràng.
+Mở phần tương tác để tải bình luận và các câu trả lời Facebook cung cấp cho bài đó.
+Radar giữ các trang đã tải trong cơ sở dữ liệu và hiển thị nút xem thêm khi nguồn
+cung cấp trang tiếp theo cho truy vấn đang dùng. Khi Facebook chỉ cung cấp bản xem
+trước, Radar hiện trạng thái tương ứng và đường dẫn đến bài gốc.
+
+Thao tác gửi bình luận và thả cảm xúc là tính năng thử nghiệm. Để hiện các nút gửi
+cho một bài thử đã xác định, đặt `RADAR_FACEBOOK_WRITE_POST_IDS` trong `.env.phase1`
+thành ID của bài Facebook rồi khởi động lại Radar. Giá trị mặc định là danh sách
+rỗng. Radar hiển thị tài khoản Facebook sẽ thao tác và gửi yêu cầu khi bạn bấm nút.
+Nếu Facebook không xác nhận kết quả, hãy kiểm tra bài gốc trước khi gửi lại.

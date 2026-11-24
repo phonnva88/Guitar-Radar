@@ -71,8 +71,10 @@ def prepare_post(item, group_id):
     except ValueError as exc:
         raise FilterError("Invalid video metadata") from exc
     text = item.get("text") if isinstance(item.get("text"), str) and item["text"].strip() else None
+    from normalizer.engagement import post_engagement
     return {"post_id": post_id, "url": url, "canonical_key": key, "text": text,
             "author_id": str(item["author_id"]) if item.get("author_id") is not None else None,
             "author_name": item.get("author_name") if isinstance(item.get("author_name"), str) else None,
             "posted_at": posted_at, "fingerprint": fingerprint(text), "media": media,
-            "videos": videos, "album_photos_complete": item.get("album_photos_complete") is not False}
+            "videos": videos, "album_photos_complete": item.get("album_photos_complete") is not False,
+            "engagement": post_engagement(item.get("engagement"))}

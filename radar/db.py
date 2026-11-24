@@ -49,6 +49,21 @@ def _positive_id(value):
     return value
 
 
+def save_engagement(conn, post_id, engagement):
+    conn.execute("""INSERT INTO post_engagement
+                    (post_id, feedback_id, comment_count, reaction_count, comment_count_at, reaction_count_at)
+                    VALUES (%s,%s,%s,%s,CASE WHEN %s::integer IS NOT NULL THEN now() END,
+                                         CASE WHEN %s::integer IS NOT NULL THEN now() END)
+                    ON CONFLICT (post_id) DO UPDATE SET
+                        feedback_id = EXCLUDED.feedback_id,
+                        comment_count = COALESCE(EXCLUDED.comment_count, post_engagement.comment_count),
+                        reaction_count = COALESCE(EXCLUDED.reaction_count, post_engagement.reaction_count),
+                        comment_count_at = COALESCE(EXCLUDED.comment_count_at, post_engagement.comment_count_at),
+                        reaction_count_at = COALESCE(EXCLUDED.reaction_count_at, post_engagement.reaction_count_at)""",
+                 (post_id, engagement["feedback_id"], engagement["comment_count"], engagement["reaction_count"],
+                  engagement["comment_count"], engagement["reaction_count"]))
+
+
 def _group_url(value):
     if not isinstance(value, str):
         raise InvalidInput("Expected a Facebook group URL or numeric ID")
@@ -228,6 +243,8 @@ class Database:
                         stored_id = conn.execute("""INSERT INTO posts(listing_id,group_id,post_id,canonical_key,url,text,author_id,author_name,posted_at,text_fingerprint,source)
                                                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                                                  (listing, group["id"], post["post_id"], post["canonical_key"], post["url"], post["text"], post["author_id"], post["author_name"], post["posted_at"], post["fingerprint"], source)).fetchone()["id"]
+                    if source == "live" and post["engagement"]:
+                        save_engagement(conn, stored_id, post["engagement"])
                     replace_media = not existing or status == "success" or bool(post["media"])
                     if existing and replace_media and not post["album_photos_complete"]:
                         saved_photos = conn.execute("SELECT count(*) AS count FROM media WHERE post_id=%s",
@@ -358,7 +375,12 @@ class Database:
             return conn.execute("SELECT r.*,g.name AS group_name FROM collection_runs r JOIN monitored_groups g ON g.id=r.group_id ORDER BY r.id DESC LIMIT %s", (limit,)).fetchall()
 
     def _decorate(self, conn, rows):
+        counts = {item["post_id"]: item for item in conn.execute("""SELECT post_id, comment_count, reaction_count,
+                    comment_count_at, reaction_count_at FROM post_engagement WHERE post_id = ANY(%s)""",
+                    ([row["id"] for row in rows],)).fetchall()} if rows else {}
         for row in rows:
+            count = counts.get(row["id"])
+            row["engagement"] = ({key: val for key, val in count.items() if key != "post_id"} if count else None)
             row["images"] = [x["url"] for x in conn.execute("SELECT url FROM media WHERE post_id=%s ORDER BY position", (row["id"],)).fetchall()]
             videos = conn.execute("""SELECT video_id,kind,thumbnail_url,duration_seconds,width,height,playback_url,
                                    playback_url_expires_at,playback_url_ephemeral

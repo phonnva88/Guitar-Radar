@@ -45,9 +45,10 @@ def write_json(path: Path, value: dict) -> None:
             os.unlink(name)
 
 
-def load_local_env() -> None:
+def load_local_env(environ=None) -> None:
     """Read only supported keys, without shell evaluation or value logging."""
     path = ROOT / ".env"
+    env = os.environ if environ is None else environ
     allowed = {"FACEBOOK_COOKIE", "FACEBOOK_COOKIE_FILE", "FACEBOOK_USER_ID", "FACEBOOK_GROUP_ID", "KNOWN_IMAGE_POSTS"}
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -66,10 +67,10 @@ def load_local_env() -> None:
                 raise RunError("authentication_failed", "Invalid .env quoting; no values were logged.") from None
             # Unquoted header values are accepted; use quotes for cookies containing #.
             parsed = " ".join(parts)
-            os.environ.setdefault(key, parsed)
-    if not os.environ.get("FACEBOOK_COOKIE") and os.environ.get("FACEBOOK_COOKIE_FILE"):
+            env.setdefault(key, parsed)
+    if not env.get("FACEBOOK_COOKIE") and env.get("FACEBOOK_COOKIE_FILE"):
         try:
-            os.environ["FACEBOOK_COOKIE"] = Path(os.environ["FACEBOOK_COOKIE_FILE"]).expanduser().read_text(encoding="utf-8").strip()
+            env["FACEBOOK_COOKIE"] = Path(env["FACEBOOK_COOKIE_FILE"]).expanduser().read_text(encoding="utf-8").strip()
         except OSError:
             raise RunError("authentication_failed", "Cannot read FACEBOOK_COOKIE_FILE; check its path and permissions.") from None
 

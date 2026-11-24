@@ -45,6 +45,7 @@ def main(argv=None):
             else:
                 import uvicorn
                 from radar.app import create_app
+                app = create_app(settings, db)
                 stopped = threading.Event()
                 thread = None
                 if not args.no_worker:
@@ -56,7 +57,7 @@ def main(argv=None):
                     thread = threading.Thread(target=run_worker, name="radar-worker", daemon=False)
                     thread.start()
                 try:
-                    uvicorn.run(create_app(settings, db), host=settings.host, port=settings.port,
+                    uvicorn.run(app, host=settings.host, port=settings.port,
                                 access_log=False, log_level="warning", proxy_headers=False)
                 finally:
                     stopped.set()

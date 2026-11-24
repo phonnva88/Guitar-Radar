@@ -7,6 +7,7 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 try:
     import psycopg
@@ -48,13 +49,45 @@ class DatabaseTests(unittest.TestCase):
                 "text": text or "Fender guitar for sale with complete original case and accessories.",
                 "images": images or [], "posted_at": when, "author_name": "Fixture author"}
 
-    def ingest(self, group, posts, status="success", errors=None):
+    def ingest(self, group, posts, status="success", errors=None, *, source="synthetic"):
         self.db.enqueue(group["id"])
         run = self.db.claim_next()
         self.assertIsNotNone(run)
         return self.db.complete_run(run["id"], {"group_id": group["facebook_group_id"], "status": status,
-                    "source": "synthetic", "errors": errors or [], "posts": posts,
+                    "source": source, "errors": errors or [], "posts": posts,
                     "window": {"complete": status == "success"}})
+
+    def test_engagement_caches_comments_and_does_not_repeat_writes(self):
+        from radar.engagement import EngagementError, FacebookEngagement
+
+        group = self.group()
+        post = {**self.post(), "engagement": {"feedback_id": "feedback:101", "comment_count": 0}}
+        self.ingest(group, [post], source="live")
+        saved = self.db.feed()["items"][0]
+        self.assertEqual(saved["engagement"]["comment_count"], 0)
+        self.assertIsNone(saved["engagement"]["reaction_count"])
+        self.assertNotIn("feedback_id", saved["engagement"])
+        service = FacebookEngagement(self.db, write_posts=("101",))
+        first = {"comments": [{"id": "one", "message": "Hi"}], "next_cursor": "provider-cursor"}
+        second = {"comments": [{"id": "two", "message": "Hello"}]}
+        sent = {"comment": {"id": "three", "message": "Test comment"}}
+        action_id = uuid.uuid4()
+        with (patch.object(service, "_session", return_value=({}, "22")),
+              patch.object(service, "_fetch", side_effect=[first, second, sent]) as fetch):
+            self.assertTrue(service.info(saved["id"])["can_write"])
+            page = service.comments(saved["id"], 1, None)
+            self.assertNotIn("provider-cursor", repr(page))
+            self.assertEqual(service.comments(saved["id"], 1, None), page)
+            self.assertEqual(service.comments(saved["id"], 2, page["thread"])["items"][0]["id"], "two")
+            with self.assertRaises(EngagementError):
+                service.comments(saved["id"], 2, uuid.uuid4())
+            args = saved["id"], "22", action_id, "comment"
+            result = service.write(*args, message="Test comment")
+            self.assertEqual(result["state"], "confirmed")
+            self.assertEqual(service.write(*args, message="Test comment"), result)
+            with self.assertRaises(InvalidInput):
+                service.write(*args, message="Different comment")
+            self.assertEqual(fetch.call_count, 3)
 
     def test_repeat_ingestion_updates_without_duplicate_and_failed_run_keeps_posts(self):
         group = self.group()

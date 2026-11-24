@@ -284,6 +284,17 @@ h4{font-size:13px;font-weight:650}
 .expand-text{display:inline-block;background:none;border:0;padding:8px 0 0;font-size:10px;color:#6a884d}
 .post-bottom{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:20px;padding-top:14px;border-top:1px solid var(--line)}
 .post-bottom .source-link{font-size:10px}
+.post-engagement{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+.engagement-summary{font-size:12px;font-weight:650;cursor:pointer}
+.engagement-body{padding-top:8px}
+.engagement-comments{list-style:none;padding:0}
+.engagement-comment{padding:8px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.engagement-reply{margin-left:16px;padding-left:8px;border-left:2px solid var(--line)}
+.engagement-comment strong{display:inline-block;margin-right:8px;font-size:12px}
+.engagement-comment p{white-space:pre-wrap;margin:4px 0;font-size:13px}
+.engagement-actions{margin-top:10px}
+.engagement-input{display:block;width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;margin-bottom:8px;font:inherit}
+.engagement-reaction{padding:6px;margin:8px 8px 0 0;font:inherit}
 .source-count{font-size:9px;color:#91997f}
 .source-links{display:flex;gap:12px;flex-wrap:wrap;padding-top:12px}
 .source-links .source-link{font-size:10px}

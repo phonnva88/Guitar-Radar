@@ -69,6 +69,9 @@
       for (const video of videos) body.append(window.RadarVideo.create(video, post.url));
     }
     if (content.length > 220 && !compact) { const toggle = node("button", "expand-text", "Xem thêm"); toggle.addEventListener("click", () => { const expanded = text.classList.toggle("expanded"); toggle.textContent = expanded ? "Thu gọn" : "Xem thêm"; toggle.setAttribute("aria-expanded", String(expanded)); }); toggle.setAttribute("aria-expanded", "false"); body.append(toggle); }
+    if (!compact && window.RadarEngagement) {
+      body.append(window.RadarEngagement.create(post, {api, node, link, formatDate}));
+    }
     const bottom = node("div", "post-bottom"); bottom.append(link("Xem bài gốc →", post.url));
     const sources = Array.isArray(post.sources) ? post.sources : [];
     if (sources.length > 1) bottom.append(node("span", "source-count", `${sources.length} bài đã gom`));

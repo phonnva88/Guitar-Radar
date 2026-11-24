@@ -186,11 +186,7 @@ func safeFetch(ctx context.Context, c groupClient, user, group string, opts grou
 
 func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory clientFactory, result *envelope, log io.Writer) {
 	capture := &rawCapture{Stories: map[string]*storyEvidence{}, DebugDir: cfg.DebugDir}
-	for name, value := range cookies.Jar {
-		if name != "c_user" && name != "ps_l" && name != "ps_n" && (len(value) >= 4 || name == "xs") {
-			capture.Secrets = append(capture.Secrets, value)
-		}
-	}
+	capture.Secrets = cookieSecrets(cookies)
 	ctx = captureContext(ctx, capture)
 	if result.Window != nil {
 		result.Window.StopReason = "error"
@@ -282,6 +278,9 @@ func collect(ctx context.Context, cfg config, cookies groups.Cookies, factory cl
 				evidence = capture.Stories[post.StoryID]
 			}
 			if evidence != nil {
+				comments, reactions := storyFeedbackCounts(evidence.Story, post.FeedbackID)
+				enriched["comment_count"] = comments
+				enriched["reaction_count"] = reactions
 				images := evidence.Images
 				// The feed also contains posts outside the requested time range.
 				// Only expand albums that the caller will actually ingest.
@@ -507,4 +506,9 @@ func run(args []string, getenv func(string) string, stderr io.Writer, factory cl
 	return 0
 }
 
-func main() { os.Exit(run(os.Args[1:], os.Getenv, os.Stderr, newClient)) }
+func main() {
+	if len(os.Args) == 2 && os.Args[1] == "engagement" {
+		os.Exit(runEngagement(os.Stdin, os.Stdout, os.Getenv))
+	}
+	os.Exit(run(os.Args[1:], os.Getenv, os.Stderr, newClient))
+}

@@ -6,7 +6,9 @@ import binascii
 import hmac
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, FileResponse
@@ -17,6 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from radar.config import Settings
 from radar.db import Database, Conflict, NotFound, InvalidInput
+from radar.engagement import EngagementError, FacebookEngagement
 from scripts.phase0 import group_handle, safe_group_input, RunError
 
 STATIC = Path(__file__).parent / "static"
@@ -40,6 +43,19 @@ class CollectionRequest(BaseModel):
     end: datetime | None = None
 
 
+class EngagementAction(BaseModel):
+    account_id: str = Field(pattern=r"^[0-9]{1,32}$")
+    action_id: UUID
+
+
+class CommentCreate(EngagementAction):
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class ReactionSet(EngagementAction):
+    reaction: Literal["LIKE", "LOVE", "CARE", "HAHA", "WOW", "SAD", "ANGRY"]
+
+
 class KnownPostCreate(BaseModel):
     group_id: int = Field(ge=1)
     url: str = Field(min_length=1, max_length=400)
@@ -49,8 +65,9 @@ class KnownPostCreate(BaseModel):
     expected_image_count: int | None = Field(None, ge=0, le=1000)
 
 
-def create_app(settings: Settings, database: Database | None = None) -> FastAPI:
+def create_app(settings: Settings, database: Database | None = None, *, engagement=None) -> FastAPI:
     db = database or Database(settings.database_url)
+    interactions = engagement or FacebookEngagement(db, settings.facebook_write_posts)
     app = FastAPI(title="Guitar Radar", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
@@ -97,6 +114,10 @@ def create_app(settings: Settings, database: Database | None = None) -> FastAPI:
     @app.exception_handler(NotFound)
     async def not_found(request, exc):
         return JSONResponse({"detail": "Không tìm thấy dữ liệu."}, status_code=404)
+
+    @app.exception_handler(EngagementError)
+    async def engagement_error(request, exc):
+        return JSONResponse({"detail": exc.code}, status_code=exc.http_status)
 
     @app.exception_handler(Conflict)
     async def conflict(request, exc):
@@ -166,6 +187,26 @@ def create_app(settings: Settings, database: Database | None = None) -> FastAPI:
         if start and end and start > end:
             raise HTTPException(422, "Ngày bắt đầu phải trước ngày kết thúc.")
         return db.feed(q=q, group_id=group_id, start=start, end=end, has_images=has_images, page=page, page_size=page_size)
+
+    @app.get("/api/posts/{post_id}/engagement")
+    def post_engagement(post_id: int):
+        return interactions.info(post_id)
+
+    @app.get("/api/posts/{post_id}/comments")
+    def post_comments(post_id: int, page: int = Query(1, ge=1, le=100),
+                      thread: UUID | None = None, refresh: bool = False):
+        return interactions.comments(post_id, page, thread, refresh)
+
+    @app.post("/api/posts/{post_id}/comments")
+    def create_comment(post_id: int, body: CommentCreate):
+        message = body.message.strip()
+        if not message or "\x00" in message:
+            raise InvalidInput("Nhập nội dung bình luận.")
+        return interactions.write(post_id, body.account_id, body.action_id, "comment", message=message)
+
+    @app.post("/api/posts/{post_id}/reaction")
+    def set_reaction(post_id: int, body: ReactionSet):
+        return interactions.write(post_id, body.account_id, body.action_id, "reaction", reaction=body.reaction)
 
     @app.get("/api/runs")
     def runs():

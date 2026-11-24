@@ -37,6 +37,7 @@ class Settings:
     interval_seconds: int = 0
     lookback_hours: int = 72
     allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "::1")
+    facebook_write_posts: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls):
@@ -52,7 +53,10 @@ class Settings:
         if not 1 <= port <= 65535 or not (interval == 0 or interval >= 900) or not 1 <= lookback <= 720:
             raise ValueError("Invalid port, interval (0 or >=900 seconds), or lookback (1..720 hours)")
         hosts = tuple(x.strip() for x in os.environ.get("RADAR_ALLOWED_HOSTS", "localhost,127.0.0.1,::1").split(",") if x.strip())
-        return cls(dsn, user, password, os.environ.get("RADAR_HOST", "127.0.0.1"), port, interval, lookback, hosts)
+        write_posts = tuple(item.strip() for item in os.environ.get("RADAR_FACEBOOK_WRITE_POST_IDS", "").split(",") if item.strip())
+        if any(not item.isascii() or not item.isdecimal() or len(item) > 32 for item in write_posts):
+            raise ValueError("RADAR_FACEBOOK_WRITE_POST_IDS must contain numeric Facebook post IDs")
+        return cls(dsn, user, password, os.environ.get("RADAR_HOST", "127.0.0.1"), port, interval, lookback, hosts, write_posts)
 
 
 def init_config(path: Path | None = None):
